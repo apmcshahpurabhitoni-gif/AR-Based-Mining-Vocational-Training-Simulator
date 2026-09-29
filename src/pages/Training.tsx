@@ -15,7 +15,7 @@
  * the demo cannot be blocked by a permissions prompt.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { clsx } from "clsx";
 import {
@@ -30,6 +30,13 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
+import type { SceneObject } from "../components/Scene3D";
+
+// Lazy so three.js is fetched only when a room is actually opened. The landing
+// page, the dashboard and the re-check never pay for it.
+const WalkRoom = lazy(() =>
+  import("../components/Scene3D").then((m) => ({ default: m.Scene3D })),
+);
 import { useSession, useT } from "../lib/session";
 import { Button, Chip } from "../components/ui";
 import {
@@ -246,6 +253,36 @@ export function Training({ manifest: manifestProp, phase = "training", sample, o
   // scene cannot be used to change an answer that has already been recorded.
   const locked = Boolean(currentRuntime(state, { steps: [step] } as ModuleManifest)?.resolved);
 
+  // The 3D room is the default on observe steps: "find the exit" is a
+  // navigation problem, and a navigation problem answered from a list of cards
+  // is not the thing being assessed. It is lazily imported, so nothing that
+  // does not open a room pays for three.js.
+  const [walk3d, setWalk3d] = useState(step.kind === "observe");
+
+  // The step's own target, plus the existing distractor set, so there is more
+  // than one object in the room to tell apart. These ids are already part of
+  // the product; nothing here invents safety content.
+  const walkObjects = useMemo<SceneObject[]>(() => {
+    const own = (step.targets ?? []).map((t) => ({
+      id: t.id,
+      label: localise(t.label, locale),
+      x: t.position.x,
+      y: t.position.y,
+      isExit: t.id.includes("exit"),
+    }));
+    if (own.length === 0) return [];
+    return [
+      ...own,
+      ...DISTRACTORS.map((id, i) => ({
+        id,
+        label: id.replace(/-/g, " "),
+        x: 0.12 + ((i * 0.23) % 0.8),
+        y: 0.16 + ((i * 0.31) % 0.7),
+        isExit: false,
+      })),
+    ];
+  }, [step, locale]);
+
   return (
     <div className="space-y-6">
       {/* -- Header ------------------------------------------------------ */}
@@ -265,6 +302,20 @@ export function Training({ manifest: manifestProp, phase = "training", sample, o
             )}
           </h1>
         </div>
+
+        {/* The room is the default on observe steps, so it also has to be a way
+            out: on a shared or low-end handset the 2D scene may simply be the
+            more usable surface. */}
+        {walkObjects.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setWalk3d((v) => !v)}
+            aria-pressed={walk3d}
+            className="rounded border border-ink-700 px-3 py-1.5 font-mono text-[11px] uppercase tracking-widest text-fog-400 transition-colors hover:border-amber-500 hover:text-amber-300"
+          >
+            {walk3d ? "2d scene" : "3d room"}
+          </button>
+        )}
 
         <ModeSwitch mode={state.arMode} onChange={setMode} />
       </header>
@@ -303,14 +354,33 @@ export function Training({ manifest: manifestProp, phase = "training", sample, o
 
       {/* -- Scene ------------------------------------------------------- */}
       <div className="panel overflow-hidden">
-        <Scene
-          step={step}
-          locale={locale}
-          arMode={state.arMode}
-          locked={locked}
-          onDispatch={dispatch}
-          onFallback={() => setMode("guided")}
-        />
+        {walk3d ? (
+          <div className="relative h-72 sm:h-96">
+            <Suspense
+              fallback={
+                <div className="grid h-full place-items-center font-mono text-[11px] uppercase tracking-widest text-fog-700">
+                  loading 3d room
+                </div>
+              }
+            >
+              <WalkRoom
+                objects={walkObjects}
+                selectedId={runtime?.satisfiedTargets?.[0] ?? null}
+                onSelect={(id) => dispatch({ type: "tapTarget", targetId: id })}
+                onFallback={() => setWalk3d(false)}
+              />
+            </Suspense>
+          </div>
+        ) : (
+          <Scene
+            step={step}
+            locale={locale}
+            arMode={state.arMode}
+            locked={locked}
+            onDispatch={dispatch}
+            onFallback={() => setMode("guided")}
+          />
+        )}
 
         <div className="border-t border-ink-700 p-5 sm:p-6">
           <p className="text-lg font-medium leading-snug text-fog-50">
