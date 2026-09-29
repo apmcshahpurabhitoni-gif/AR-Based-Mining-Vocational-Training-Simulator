@@ -242,6 +242,9 @@ export function Training({ manifest: manifestProp, phase = "training", sample, o
   const p = progress(state, manifest);
   const remaining = hintsRemaining(state, step);
   const hint = nextHint(state, manifest);
+  // Same rule as `Interaction`: a resolved step stops accepting taps, so the
+  // scene cannot be used to change an answer that has already been recorded.
+  const locked = Boolean(currentRuntime(state, { steps: [step] } as ModuleManifest)?.resolved);
 
   return (
     <div className="space-y-6">
@@ -304,6 +307,8 @@ export function Training({ manifest: manifestProp, phase = "training", sample, o
           step={step}
           locale={locale}
           arMode={state.arMode}
+          locked={locked}
+          onDispatch={dispatch}
           onFallback={() => setMode("guided")}
         />
 
@@ -404,11 +409,15 @@ function Scene({
   step,
   locale,
   arMode,
+  locked,
+  onDispatch,
   onFallback,
 }: {
   step: Step;
   locale: "en" | "hi" | "sat";
   arMode: "reticle" | "guided";
+  locked: boolean;
+  onDispatch: (action: RunnerAction) => void;
   onFallback: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -475,7 +484,12 @@ function Scene({
       )}
 
       {/* Reticle reticles / guided hotspots, at the coordinates the manifest
-          declares. Content authors place these; the runner never guesses. */}
+          declares. Content authors place these; the runner never guesses.
+
+          These are the real tap targets, not decoration. A trainee is looking
+          at this box and reaching for the thing in it, so the thing in it has
+          to answer — otherwise the cards below look like the only way in and
+          the scene reads as decoration the app forgot to wire up. */}
       <div className="absolute inset-0">
         {(step.targets ?? []).map((target) => (
           <TargetMarker
@@ -484,6 +498,8 @@ function Scene({
             y={target.position.y}
             label={localise(target.label, locale)}
             mode={arMode}
+            locked={locked}
+            onTap={() => onDispatch({ type: "tapTarget", targetId: target.id })}
           />
         ))}
       </div>
@@ -503,36 +519,55 @@ function TargetMarker({
   y,
   label,
   mode,
+  locked,
+  onTap,
 }: {
   x: number;
   y: number;
   label: string;
   mode: "reticle" | "guided";
+  locked: boolean;
+  onTap: () => void;
 }) {
   return (
-    <div
-      className="absolute -translate-x-1/2 -translate-y-1/2"
+    <button
+      type="button"
+      disabled={locked}
+      onClick={onTap}
+      aria-label={label}
+      className={clsx(
+        // `group` so the ring swells when the pointer is anywhere on the
+        // marker, label included — the whole thing is the hit area.
+        "group absolute -translate-x-1/2 -translate-y-1/2 text-center",
+        locked ? "cursor-not-allowed opacity-50" : "cursor-pointer",
+      )}
       style={{ left: `${x * 100}%`, top: `${y * 100}%` }}
     >
-      <div className="relative">
+      <span className="relative inline-block">
         {mode === "reticle" && (
           <span className="absolute -inset-3 rounded-full border border-amber-400/40 animate-sweep" />
         )}
         <span
           className={clsx(
-            "grid place-items-center rounded-full border-2 font-mono text-[10px] font-bold",
+            "grid place-items-center rounded-full border-2 font-mono text-[10px] font-bold transition-transform",
             mode === "reticle"
               ? "h-10 w-10 border-amber-400 bg-amber-400/20 text-amber-200"
-              : "h-8 w-8 border-fog-600 bg-ink-800 text-fog-400",
+              : "h-8 w-8 border-fog-500 bg-ink-800 text-fog-300",
+            !locked && "group-hover:scale-110 active:scale-95",
           )}
         >
           {mode === "reticle" ? "◎" : "·"}
         </span>
-      </div>
-      <span className="mt-2 block max-w-[10rem] truncate text-center text-xs text-fog-400">
+      </span>
+      <span
+        className={clsx(
+          "mt-2 block max-w-[10rem] truncate text-xs",
+          locked ? "text-fog-600" : "text-fog-300 underline decoration-dotted underline-offset-4",
+        )}
+      >
         {label}
       </span>
-    </div>
+    </button>
   );
 }
 
