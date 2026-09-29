@@ -1,0 +1,220 @@
+/*
+ * KAVACH design system.
+ *
+ * The visual language is industrial plant signage rather than consumer SaaS:
+ * a dark control-room surface, hazard-tape accents, monospaced data, and a
+ * strict amber-on-graphite palette. Safety amber is the primary because it is
+ * the colour the users of this product already read as "caution" — and it is
+ * legible at the viewing angles of a phone held in a gloved hand.
+ *
+ * Tailwind v4: tokens live in `@theme` and generate utilities automatically.
+ * Fonts are system stacks on purpose — self-hosted would mean shipping a
+ * binary to a mine LAN that may never see it, and a CDN is not available
+ * offline. No webfont is fetched at any point.
+ */
+
+@import "tailwindcss";
+
+@theme {
+  /* -- Surfaces: a graphite plant console ------------------------------- */
+  --color-ink-950: #06090d;
+  --color-ink-900: #0a0f16;
+  --color-ink-850: #0e151e;
+  --color-ink-800: #131c27;
+  --color-ink-700: #1b2734;
+  --color-ink-600: #26333f;
+  --color-ink-500: #35434f;
+
+  /* -- Text -------------------------------------------------------------- */
+  --color-fog-50: #f4f8fb;
+  --color-fog-200: #cdd9e4;
+  --color-fog-400: #90a2b5;
+  --color-fog-600: #5f7285;
+  --color-fog-800: #3a4854;
+
+  /* -- Safety amber: the primary --------------------------------------- */
+  --color-amber-200: #ffe2a8;
+  --color-amber-300: #ffcf72;
+  --color-amber-400: #ffb020;
+  --color-amber-500: #f5920a;
+  --color-amber-600: #c96c06;
+  --color-amber-700: #8f4c05;
+
+  /* -- Verdicts. Never red/green alone — always paired with an icon or
+        label, because colour-only signalling fails for ~8% of men. ------ */
+  --color-go-300: #7bf0cd;
+  --color-go-400: #29d3a2;
+  --color-go-600: #0f8f6b;
+  --color-warn-400: #ff8a3d;
+  --color-warn-600: #b8531a;
+  --color-halt-300: #ff9c8f;
+  --color-halt-400: #ff5a47;
+  --color-halt-600: #b32c1c;
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans",
+    "Noto Sans Devanagari", Helvetica, Arial, sans-serif;
+  --font-mono:
+    ui-monospace, "SFMono-Regular", "Roboto Mono", "DejaVu Sans Mono", Menlo,
+    Consolas, monospace;
+
+  --radius-panel: 0.75rem;
+}
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    border-color: var(--color-ink-700);
+  }
+
+  html {
+    background-color: var(--color-ink-950);
+    color-scheme: dark;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-ink-950);
+    color: var(--color-fog-50);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overscroll-behavior-y: none;
+  }
+
+  /* Devanagari needs a touch more line height than the Latin default or the
+     matras collide at small sizes — this matters on the Hindi build. */
+  :lang(hi) {
+    line-height: 1.75;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-amber-400);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  ::selection {
+    background-color: var(--color-amber-400);
+    color: var(--color-ink-950);
+  }
+
+  /* Numbers in this app are data. Tabular figures stop columns jittering
+     as values tick over during a live run. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+}
+
+@layer components {
+  /* Blueprint grid — the plant-floor drafting reference. */
+  .grid-bg {
+    background-image:
+      linear-gradient(to right, rgba(255, 176, 32, 0.045) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 176, 32, 0.045) 1px, transparent 1px);
+    background-size: 48px 48px;
+  }
+
+  .grid-bg-fine {
+    background-image:
+      linear-gradient(to right, rgba(255, 176, 32, 0.03) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 176, 32, 0.03) 1px, transparent 1px);
+    background-size: 16px 16px;
+  }
+
+  /* Hazard tape. Used sparingly — at the very top of the shell and on
+     certificate-blocking failures. More than a few of these and the whole
+     page reads as an alarm, which is exactly when an alarm means nothing. */
+  .hazard-tape {
+    background-image: repeating-linear-gradient(
+      -45deg,
+      var(--color-amber-400) 0 10px,
+      var(--color-ink-950) 10px 20px
+    );
+  }
+
+  .panel {
+    background-color: color-mix(in oklab, var(--color-ink-850) 92%, transparent);
+    border: 1px solid var(--color-ink-700);
+    border-radius: var(--radius-panel);
+  }
+
+  .panel-inset {
+    background-color: var(--color-ink-900);
+    border: 1px solid var(--color-ink-700);
+    border-radius: var(--radius-panel);
+  }
+
+  /* Ambient amber wash used behind the hero and the certificate. */
+  .glow-amber {
+    box-shadow:
+      0 0 0 1px rgba(255, 176, 32, 0.18),
+      0 18px 60px -18px rgba(245, 146, 10, 0.45);
+  }
+
+  .text-glow {
+    text-shadow: 0 0 28px rgba(255, 176, 32, 0.35);
+  }
+}
+
+@layer utilities {
+  .animate-rise {
+    animation: rise 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .animate-pulse-ring {
+    animation: pulse-ring 2.4s ease-out infinite;
+  }
+
+  .animate-sweep {
+    animation: sweep 1.8s ease-in-out infinite;
+  }
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes pulse-ring {
+    0% {
+      transform: scale(0.85);
+      opacity: 0.7;
+    }
+    70% {
+      transform: scale(1.5);
+      opacity: 0;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+
+  @keyframes sweep {
+    0%,
+    100% {
+      opacity: 0.25;
+    }
+    50% {
+      opacity: 0.9;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

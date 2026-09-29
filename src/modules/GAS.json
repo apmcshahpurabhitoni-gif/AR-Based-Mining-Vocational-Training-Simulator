@@ -1,0 +1,378 @@
+{
+  "code": "GAS",
+  "domain": "gas_leak_confined_space",
+  "title": {
+    "en": "Gas Leak & Confined Space",
+    "hi": "गैस रिसाव एवं बंद जगह"
+  },
+  "version": "1.0.0",
+  "estimatedMinutes": 4,
+  "passScore": 80,
+  "steps": [
+    {
+      "id": "B-01",
+      "moduleCode": "GAS",
+      "seq": 0,
+      "kind": "observe",
+      "critical": false,
+      "instruction": {
+        "en": "Find the gas leak",
+        "hi": "गैस रिसाव ढूँढो"
+      },
+      "narrationKey": "B-01",
+      "targets": [
+        {
+          "id": "gas-cylinder",
+          "sprite": "gas-cylinder",
+          "label": {
+            "en": "Gas cylinder",
+            "hi": "गैस सिलेंडर"
+          },
+          "position": { "x": 0.24, "y": 0.45 }
+        }
+      ],
+      "success": {
+        "type": "identify",
+        "requiredTargets": ["gas-cylinder"]
+      },
+      "failure": {
+        "kind": "penalty",
+        "consequence": {
+          "en": "The leak is where the gas escapes. Methane rises, so look high.",
+          "hi": "रिसाव वहाँ है जहाँ गैस निकलती है। मीथेन हल्की होती है, ऊपर देखो।"
+        },
+        "requiresRetry": true,
+        "blocksCertificate": false
+      },
+      "hints": [
+        { "en": "Methane is lighter than air. It collects near the roof.", "hi": "मीथेन हवा से हल्की है। छत के पास जमा होती है।" },
+        { "en": "Check above head height.", "hi": "सिर की ऊँचाई से ऊपर देखो।" }
+      ],
+      "maxHints": 2,
+      "expectedMs": 15000,
+      "weight": 1
+    },
+    {
+      "id": "B-02",
+      "moduleCode": "GAS",
+      "seq": 1,
+      "kind": "decide",
+      "critical": true,
+      "instruction": {
+        "en": "Choose PPE for this zone",
+        "hi": "इस ज़ोन का सही PPE चुनो"
+      },
+      "narrationKey": "B-02",
+      "choices": [
+        {
+          "id": "sampler",
+          "label": {
+            "en": "Self-rescuer plus dust respirator and cap lamp",
+            "hi": "सेल्फ-रेस्क्यूर + डस्ट रेस्पिरेटर + कैप लैंप"
+          },
+          "correct": true,
+          "consequence": {
+            "en": "Correct. The self-rescuer is your escape route if the concentration climbs.",
+            "hi": "सही। सांस घराना तुम्हारा रास्ता है जब गैस बढ़ जाए।"
+          }
+        },
+        {
+          "id": "cloth-mask",
+          "label": {
+            "en": "Cloth dust mask only",
+            "hi": "कपड़े का डस्ट मास्क ही"
+          },
+          "correct": false,
+          "consequence": {
+            "en": "A cloth mask filters dust. It does nothing for methane or carbon monoxide.",
+            "hi": "कपड़े का मास्क धूल रोकता है। मीथेन या कार्बन मोनोऑक्साइड पर कुछ नहीं करता।"
+          },
+          "misconception": "no_gas_protection"
+        },
+        {
+          "id": "no-ppe",
+          "label": {
+            "en": "No PPE, it is only a small leak",
+            "hi": "कोई PPE नहीं, यह तो छोटा रिसाव है"
+          },
+          "correct": false,
+          "consequence": {
+            "en": "This is the single most common fatal mistake in a gas incident.",
+            "hi": "गैस दुर्घटना में यही सबसे आम जानलेवा गलती है।"
+          },
+          "misconception": "underestimate_gas"
+        },
+        {
+          "id": "canvas-gloves",
+          "label": {
+            "en": "Heavy gloves, no respiratory protection",
+            "hi": "मोटे दस्ताने, कोई श्वसन सुरक्षा नहीं"
+          },
+          "correct": false,
+          "consequence": {
+            "en": "Gloves protect your hands. Your lungs are what the gas reaches first.",
+            "hi": "दस्ताने हाथ बचाते हैं। गैस सबसे पहले फेफड़ों में जाती है।"
+          },
+          "misconception": "hand_protection_only"
+        }
+      ],
+      "success": {
+        "type": "select",
+        "minAccuracy": 1.0
+      },
+      "failure": {
+        "kind": "critical",
+        "consequence": {
+          "en": "No respiratory protection means no entry. Blocked until you choose again.",
+          "hi": "श्वसन सुरक्षा के बिना प्रवेश नहीं। दोबारा सही चुनो तब तक रुका हुआ है।"
+        },
+        "requiresRetry": true,
+        "blocksCertificate": true
+      },
+      "hints": [
+        {
+          "en": "A self-rescuer is a closed-circuit apparatus. What is it for?",
+          "hi": "सेल्फ-रेस्क्यूर एक क्लोज़्ड-सर्किट उपकरण है। यह किसलिए है?"
+        }
+      ],
+      "maxHints": 1,
+      "expectedMs": 25000,
+      "weight": 3
+    },
+    {
+      "id": "B-03",
+      "moduleCode": "GAS",
+      "seq": 2,
+      "kind": "decide",
+      "critical": true,
+      "instruction": {
+        "en": "Who enters with you?",
+        "hi": "तुम्हारे साथ कौन अंदर जाएगा?"
+      },
+      "narrationKey": "B-03",
+      "choices": [
+        {
+          "id": "two-buddy",
+          "label": {
+            "en": "One buddy, permit signed, standby stays outside",
+            "hi": "एक साथी, परमिट हस्ताक्षरित, स्टैंडबाई बाहर"
+          },
+          "correct": true,
+          "consequence": {
+            "en": "Correct. Two in, one out, permit on the board.",
+            "hi": "सही। दो अंदर, एक बाहर, परमिट बोर्ड पर।"
+          }
+        },
+        {
+          "id": "solo-fast",
+          "label": {
+            "en": "Go alone, it is faster",
+            "hi": "अकेले जाओ, जल्दी हो जाएगा"
+          },
+          "correct": false,
+          "consequence": {
+            "en": "This is a statutory violation and the deadliest confined-space error there is.",
+            "hi": "यह कानून का उल्लंघन है और बंद जगह की सबसे जानलेवा गलती।"
+          },
+          "misconception": "solo_entry"
+        },
+        {
+          "id": "three-buddy",
+          "label": {
+            "en": "Take three people in",
+            "hi": "तीन लोग अंदर ले जाओ"
+          },
+          "correct": false,
+          "consequence": {
+            "en": "The buddy system is exactly two. Three people in a confined space is a new hazard.",
+            "hi": "बडी सिस्टम ठीक दो लोग है। बंद जगह में तीन लोग नया खतरा हैं।"
+          },
+          "misconception": "wrong_buddy_ratio"
+        },
+        {
+          "id": "supervisor-inside",
+          "label": {
+            "en": "Bring the supervisor inside too",
+            "hi": "सुपरवाइज़र को भी अंदर ले आओ"
+          },
+          "correct": false,
+          "consequence": {
+            "en": "The standby must stay outside. If both of you go in, nobody is watching.",
+            "hi": "स्टैंडबाई बाहर रहेगा। दोनों अंदर गए तो कोई नहीं देखेगा।"
+          },
+          "misconception": "supervisor_in_space"
+        }
+      ],
+      "success": {
+        "type": "select",
+        "minAccuracy": 1.0
+      },
+      "failure": {
+        "kind": "critical",
+        "consequence": {
+          "en": "Nobody enters alone. Not ever. Blocked until you have a buddy.",
+          "hi": "कोई कभी अकेला अंदर नहीं जाता। साथी के बिना प्रवेश रुका हुआ है।"
+        },
+        "requiresRetry": true,
+        "blocksCertificate": true
+      },
+      "hints": [
+        {
+          "en": "How many people go in? How many stay out?",
+          "hi": "अंदर कितने जाते हैं? बाहर कितने रहते हैं?"
+        }
+      ],
+      "maxHints": 1,
+      "expectedMs": 25000,
+      "weight": 3
+    },
+    {
+      "id": "B-04",
+      "moduleCode": "GAS",
+      "seq": 3,
+      "kind": "observe",
+      "critical": false,
+      "instruction": {
+        "en": "Mark the hazard zone",
+        "hi": "खतरे का इलाका चिन्हित करो"
+      },
+      "narrationKey": "B-04",
+      "targets": [
+        {
+          "id": "zone-barrier",
+          "sprite": "zone-barrier",
+          "label": {
+            "en": "Hazard zone barrier",
+            "hi": "खतरा क्षेत्र बैरियर"
+          },
+          "position": { "x": 0.68, "y": 0.52 }
+        }
+      ],
+      "success": {
+        "type": "identify",
+        "requiredTargets": ["zone-barrier"]
+      },
+      "failure": {
+        "kind": "penalty",
+        "consequence": {
+          "en": "Mark the boundary so no one walks in.",
+          "hi": "सीमा चिन्हित करो ताकि कोई अंदर न जाए।"
+        },
+        "requiresRetry": true,
+        "blocksCertificate": false
+      },
+      "hints": [
+        { "en": "Tape or barricade, at the edge of the reading.", "hi": "टेप या बैरिकेड, रीडिंग के किनारे पर।" }
+      ],
+      "maxHints": 1,
+      "expectedMs": 15000,
+      "weight": 1
+    },
+    {
+      "id": "B-05",
+      "moduleCode": "GAS",
+      "seq": 4,
+      "kind": "act",
+      "critical": true,
+      "instruction": {
+        "en": "Close the main valve first",
+        "hi": "पहले मुख्य वाल्व बंद करो"
+      },
+      "narrationKey": "B-05",
+      "action": {
+        "type": "sequence",
+        "elements": ["valve-main", "valve-isolate"],
+        "expectedMs": 30000
+      },
+      "success": {
+        "type": "complete"
+      },
+      "failure": {
+        "kind": "critical",
+        "consequence": {
+          "en": "Wrong order. Closing downstream first pushes gas the wrong way. The supply is still live.",
+          "hi": "गलत क्रम। पहले डाउनस्ट्रीम बंद करने से गैस उल्टी दिशा में जाती है। सप्लाई अब भी लाइव है।"
+        },
+        "requiresRetry": true,
+        "blocksCertificate": true
+      },
+      "hints": [
+        {
+          "en": "Isolate from the source, then from the load.",
+          "hi": "पहले स्रोत से अलग करो, फिर लोड से।"
+        }
+      ],
+      "maxHints": 1,
+      "expectedMs": 30000,
+      "weight": 3
+    },
+    {
+      "id": "B-06",
+      "moduleCode": "GAS",
+      "seq": 5,
+      "kind": "decide",
+      "critical": false,
+      "instruction": {
+        "en": "Where do you wait for help?",
+        "hi": "मदद की इंतज़ार कहाँ करोगे?"
+      },
+      "narrationKey": "B-06",
+      "choices": [
+        {
+          "id": "refuge-chamber",
+          "label": {
+            "en": "Move to the refuge chamber",
+            "hi": "रिफ्यूज चेंबर में जाओ"
+          },
+          "correct": true,
+          "consequence": {
+            "en": "Correct. The refuge chamber is pressurised and on the rescue route.",
+            "hi": "सही। रिफ्यूज चेंबर दबावयुक्त है और बचाव मार्ग पर है।"
+          }
+        },
+        {
+          "id": "surface-exit",
+          "label": {
+            "en": "Head straight for the surface",
+            "hi": "सीधे सतह पर निकल जाओ"
+          },
+          "correct": false,
+          "consequence": {
+            "en": "The surface can be the gas path. You would be walking into the plume.",
+            "hi": "सतह ही गैस का रास्ता हो सकती है। तुम धुआँ के अंदर चल रहे होगे।"
+          },
+          "misconception": "surface_during_gas"
+        },
+        {
+          "id": "continue-work",
+          "label": {
+            "en": "Finish the job, then report",
+            "hi": "काम पूरा करो, फिर बताओ"
+          },
+          "correct": false,
+          "consequence": {
+            "en": "Every minute you delay is a minute past the survivable window.",
+            "hi": "हर मिनट की देरी बचने की सीमा से आगे का एक मिनट है।"
+          },
+          "misconception": "delay_rescue"
+        }
+      ],
+      "success": {
+        "type": "select"
+      },
+      "failure": {
+        "kind": "penalty",
+        "consequence": {
+          "en": "Get to the refuge chamber and stay there so they can find you.",
+          "hi": "रिफ्यूज चेंबर में जाओ और वहीं रहो ताकि वे तुम्हें ढूँढ सकें।"
+        },
+        "requiresRetry": true,
+        "blocksCertificate": false
+      },
+      "hints": [],
+      "maxHints": 0,
+      "expectedMs": 15000,
+      "weight": 1
+    }
+  ]
+}

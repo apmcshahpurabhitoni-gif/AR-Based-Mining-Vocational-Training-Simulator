@@ -1,0 +1,335 @@
+{
+  "code": "FIRE",
+  "domain": "fire_and_explosion",
+  "title": {
+    "en": "Fire & Explosion Response",
+    "hi": "आग एवं विस्फोट प्रतिक्रिया"
+  },
+  "version": "1.0.0",
+  "estimatedMinutes": 4,
+  "passScore": 80,
+  "steps": [
+    {
+      "id": "A-01",
+      "moduleCode": "FIRE",
+      "seq": 0,
+      "kind": "observe",
+      "critical": false,
+      "instruction": {
+        "en": "Find the nearest exit",
+        "hi": "सबसे निकट का रास्ता ढूँढो"
+      },
+      "narrationKey": "A-01",
+      "targets": [
+        {
+          "id": "exit-sign",
+          "sprite": "exit-sign",
+          "label": {
+            "en": "Emergency exit",
+            "hi": "आपातकालीन निकास"
+          },
+          "position": { "x": 0.72, "y": 0.34 }
+        }
+      ],
+      "success": {
+        "type": "identify",
+        "requiredTargets": ["exit-sign"]
+      },
+      "failure": {
+        "kind": "penalty",
+        "consequence": {
+          "en": "Look around. The exit sign is on the wall.",
+          "hi": "चारों ओर देखो। निकास का बोर्ड दीवार पर है।"
+        },
+        "requiresRetry": true,
+        "blocksCertificate": false
+      },
+      "hints": [
+        { "en": "Exit signs are green.", "hi": "निकास बोर्ड हरे रंग का होता है।" },
+        { "en": "Check the far wall.", "hi": "दूरी की दीवार देखो।" },
+        { "en": "It glows in the dark.", "hi": "अंधेरे में यह चमकता है।" }
+      ],
+      "maxHints": 3,
+      "expectedMs": 15000,
+      "weight": 1
+    },
+    {
+      "id": "A-02",
+      "moduleCode": "FIRE",
+      "seq": 1,
+      "kind": "observe",
+      "critical": false,
+      "instruction": {
+        "en": "Sound the fire alarm",
+        "hi": "आग की सायरन बजाओ"
+      },
+      "narrationKey": "A-02",
+      "targets": [
+        {
+          "id": "fire-alarm",
+          "sprite": "fire-alarm",
+          "label": {
+            "en": "Fire alarm point",
+            "hi": "अग्निशामक बटन"
+          },
+          "position": { "x": 0.28, "y": 0.38 }
+        }
+      ],
+      "success": {
+        "type": "identify",
+        "requiredTargets": ["fire-alarm"]
+      },
+      "failure": {
+        "kind": "penalty",
+        "consequence": {
+          "en": "Find the red alarm point on the wall.",
+          "hi": "दीवार पर लाल अलार्म बटन ढूँढो।"
+        },
+        "requiresRetry": true,
+        "blocksCertificate": false
+      },
+      "hints": [
+        { "en": "It is red.", "hi": "यह लाल रंग का है।" },
+        { "en": "It is at shoulder height.", "hi": "यह कंधे की ऊँचाई पर होता है।" }
+      ],
+      "maxHints": 2,
+      "expectedMs": 12000,
+      "weight": 1
+    },
+    {
+      "id": "A-03",
+      "moduleCode": "FIRE",
+      "seq": 2,
+      "kind": "decide",
+      "critical": true,
+      "instruction": {
+        "en": "Pick the right extinguisher",
+        "hi": "सही बुझावा चुनो"
+      },
+      "narrationKey": "A-03",
+      "choices": [
+        {
+          "id": "co2",
+          "label": {
+            "en": "CO2 extinguisher",
+            "hi": "सीओ2 बुझावा"
+          },
+          "correct": true,
+          "consequence": {
+            "en": "Correct. CO2 does not conduct and leaves no residue.",
+            "hi": "सही। सीओ2 चालक नहीं है और कोई अवशेष नहीं छोड़ता।"
+          }
+        },
+        {
+          "id": "water",
+          "label": {
+            "en": "Water extinguisher",
+            "hi": "पानी का बुझावा"
+          },
+          "correct": false,
+          "consequence": {
+            "en": "Water on a live electrical fire kills. It conducts current straight through you.",
+            "hi": "लाइव बिजली पर पानी मौत लाता है। यह धारा सीधे आपके शरीर में जाती है।"
+          },
+          "misconception": "water_on_electrical"
+        },
+        {
+          "id": "abc",
+          "label": {
+            "en": "ABC dry powder",
+            "hi": "एबीसी ड्राई पाउडर"
+          },
+          "correct": false,
+          "consequence": {
+            "en": "Powder smothers the flame but leaves hot residue. It can reignite.",
+            "hi": "पाउडर लौभ को दबाता है पर गर्म अवशेष छोड़ता है। दोबारा जल सकता है।"
+          },
+          "misconception": "wrong_fire_class"
+        },
+        {
+          "id": "foam",
+          "label": {
+            "en": "Foam extinguisher",
+            "hi": "फोम बुझावा"
+          },
+          "correct": false,
+          "consequence": {
+            "en": "Foam is for liquid and spill fires. It is not for an energised electrical fire.",
+            "hi": "फोम तरल और रिसाव की आग के लिए है। बिजली की आग के लिए नहीं।"
+          },
+          "misconception": "wrong_fire_class"
+        }
+      ],
+      "success": {
+        "type": "select",
+        "minAccuracy": 1.0
+      },
+      "failure": {
+        "kind": "critical",
+        "consequence": {
+          "en": "Water conducts. This extinguisher is locked until you choose again.",
+          "hi": "पानी बिजली चलाता है। जब तक दोबारा सही चुनो, बुझावा ताला बंद है।"
+        },
+        "requiresRetry": true,
+        "blocksCertificate": true
+      },
+      "hints": [
+        {
+          "en": "This is an energised electrical fire. Think about what conducts.",
+          "hi": "यह बिजली की जीवित आग है। सोचो कौन बिजली चलाता है।"
+        },
+        {
+          "en": "You need something that neither conducts nor leaves residue.",
+          "hi": "तुम्हें ऐसा चाहिए जो बिजली न चलाए और न अवशेष छोड़े।"
+        }
+      ],
+      "maxHints": 2,
+      "expectedMs": 20000,
+      "weight": 3
+    },
+    {
+      "id": "A-04",
+      "moduleCode": "FIRE",
+      "seq": 3,
+      "kind": "act",
+      "critical": false,
+      "instruction": {
+        "en": "Use the PASS technique",
+        "hi": "PASS तरीका अपनाओ"
+      },
+      "narrationKey": "A-04",
+      "action": {
+        "type": "sequence",
+        "elements": ["pull-pin", "aim-base", "squeeze", "sweep"],
+        "expectedMs": 25000
+      },
+      "success": {
+        "type": "complete"
+      },
+      "failure": {
+        "kind": "hazard",
+        "consequence": {
+          "en": "Smoke builds. Start again — P-A-S-S, in order.",
+          "hi": "धुआँ भर गया। फिर से शुरू करो — P-A-S-S, क्रम में।"
+        },
+        "requiresRetry": true,
+        "blocksCertificate": false
+      },
+      "hints": [
+        { "en": "P = Pull the pin.", "hi": "P = पिन खींचो।" },
+        { "en": "A = Aim at the base of the fire.", "hi": "A = आग के आधार पर निशाना लगाओ।" },
+        { "en": "S = Squeeze the handle.", "hi": "S = हैंडल दबाओ।" },
+        { "en": "S = Sweep side to side.", "hi": "S = बाएँ से दाएँ स्वीप करो।" }
+      ],
+      "maxHints": 4,
+      "expectedMs": 30000,
+      "weight": 1
+    },
+    {
+      "id": "A-05",
+      "moduleCode": "FIRE",
+      "seq": 4,
+      "kind": "act",
+      "critical": true,
+      "instruction": {
+        "en": "Leave in order, nearest first",
+        "hi": "क्रम में बाहर निकलो, पहले सबसे निकट वाला"
+      },
+      "narrationKey": "A-05",
+      "action": {
+        "type": "sequence",
+        "elements": ["person-1", "person-2", "person-3"],
+        "expectedMs": 30000
+      },
+      "success": {
+        "type": "complete"
+      },
+      "failure": {
+        "kind": "critical",
+        "consequence": {
+          "en": "Wrong order. The one nearest the fire has seconds. The ones behind have minutes.",
+          "hi": "गलत क्रम। आग के पास वाले के पास सेकंड हैं, पीछे वालों के पास मिनट।"
+        },
+        "requiresRetry": true,
+        "blocksCertificate": true
+      },
+      "hints": [
+        {
+          "en": "Order by distance from the hazard, not by who is loudest.",
+          "hi": "खतरे से दूरी के क्रम में, न कि जो सबसे ज़ोर से चिल्ला रहा है।"
+        }
+      ],
+      "maxHints": 1,
+      "expectedMs": 30000,
+      "weight": 3
+    },
+    {
+      "id": "A-06",
+      "moduleCode": "FIRE",
+      "seq": 5,
+      "kind": "decide",
+      "critical": false,
+      "instruction": {
+        "en": "Report to the assembly point",
+        "hi": "जमाव स्थल पर जाओ"
+      },
+      "narrationKey": "A-06",
+      "choices": [
+        {
+          "id": "assembly-point",
+          "label": {
+            "en": "Go to the assembly point",
+            "hi": "जमाव स्थल पर जाओ"
+          },
+          "correct": true,
+          "consequence": {
+            "en": "Correct. Your supervisor can now account for you.",
+            "hi": "सही। अब आपका सुपरवाइज़र आपका हिसाब रख सकता है।"
+          }
+        },
+        {
+          "id": "return-to-work",
+          "label": {
+            "en": "Go back and finish the shift",
+            "hi": "वापस जाकर शिफ्ट पूरी करो"
+          },
+          "correct": false,
+          "consequence": {
+            "en": "Re-entry needs authority. People die going back in for equipment and belongings.",
+            "hi": "दोबारा अंदर जाने की अनुमति चाहिए। सामान लेने लौटने पर लोग मरते हैं।"
+          },
+          "misconception": "return_to_work_fire"
+        },
+        {
+          "id": "go-home",
+          "label": {
+            "en": "Go straight home",
+            "hi": "सीधे घर जाओ"
+          },
+          "correct": false,
+          "consequence": {
+            "en": "If nobody accounts for you, nobody knows you are alive. You become a rescue team.",
+            "hi": "अगर कोई हिसाब न ले, तो किसी को पता ही नहीं कि तुम जीवित हो। तुम खोजी टीम बन जाओगे।"
+          },
+          "misconception": "skip_accountability"
+        }
+      ],
+      "success": {
+        "type": "select"
+      },
+      "failure": {
+        "kind": "penalty",
+        "consequence": {
+          "en": "Your supervisor must know you are alive. Go to the assembly point.",
+          "hi": "सुपरवाइज़र को पता होना चाहिए कि तुम जीवित हो। जमाव स्थल पर जाओ।"
+        },
+        "requiresRetry": true,
+        "blocksCertificate": false
+      },
+      "hints": [],
+      "maxHints": 0,
+      "expectedMs": 15000,
+      "weight": 1
+    }
+  ]
+}

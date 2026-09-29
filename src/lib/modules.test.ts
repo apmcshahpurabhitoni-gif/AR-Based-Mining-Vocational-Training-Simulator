@@ -1,0 +1,312 @@
+/**
+ * Content + registry tests.
+ *
+ * Two things are proven here:
+ *   1. the shipped manifests satisfy every content rule (C3, C5, C8)
+ *   2. the shipped manifests can actually clear the gate — a clean run scores
+ *      100 and passes, which is the promise the demo and the certificate make
+ */
+
+import { describe, expect, test } from "bun:test";
+import {
+  APPROVED_CRITICAL_STEPS,
+  MODULES,
+  MODULE_CODES,
+  getModule,
+  getStep,
+  isApprovedCritical,
+  requireModule,
+} from "./modules";
+import { validateAllModules, validateManifest, formatIssues } from "./validate-content";
+import { scoreModule, scoreOverall } from "./scoring";
+import { evaluateGate, evaluateRecheck, sampleRecheckSteps } from "./gate";
+import type { AttemptEvent, StepAttemptRecord } from "./types";
+import { SHIPPED_LOCALES } from "./types";
+
+describe("content validation", () => {
+  test("shipped manifests have zero issues", () => {
+    const issues = validateAllModules();
+    expect(formatIssues(issues)).toBe("");
+    expect(issues).toEqual([]);
+  });
+
+  test("every module is registered and retrievable", () => {
+    expect(MODULE_CODES.sort()).toEqual(["FIRE", "GAS"]);
+    for (const code of MODULE_CODES) {
+      expect(getModule(code)).toBeDefined();
+      expect(requireModule(code).code).toBe(code);
+    }
+    expect(getModule("NOPE")).toBeUndefined();
+    expect(() => requireModule("NOPE")).toThrow("Unknown module");
+  });
+
+  test("step lookup works by id", () => {
+    expect(getStep("FIRE", "A-03")?.critical).toBe(true);
+    expect(getStep("GAS", "A-03")).toBeUndefined();
+  });
+
+  test("critical roster matches the approved list exactly", () => {
+    const flagged = MODULE_CODES.flatMap((c) =>
+      MODULES[c]!.steps.filter((s) => s.critical).map((s) => s.id),
+    ).sort();
+    expect(flagged).toEqual([...APPROVED_CRITICAL_STEPS].sort());
+    for (const id of APPROVED_CRITICAL_STEPS) {
+      expect(isApprovedCritical(id)).toBe(true);
+    }
+    expect(isApprovedCritical("A-01")).toBe(false);
+  });
+
+  test("every shipped locale string is present on every step", () => {
+    for (const code of MODULE_CODES) {
+      for (const step of MODULES[code]!.steps) {
+        for (const locale of SHIPPED_LOCALES) {
+          expect(step.instruction[locale]?.trim().length ?? 0).toBeGreaterThan(0);
+          expect(step.failure.consequence[locale]?.trim().length ?? 0).toBeGreaterThan(0);
+          for (const hint of step.hints) {
+            expect(hint[locale]?.trim().length ?? 0).toBeGreaterThan(0);
+          }
+          for (const target of step.targets ?? []) {
+            expect(target.label[locale]?.trim().length ?? 0).toBeGreaterThan(0);
+          }
+          for (const choice of step.choices ?? []) {
+            expect(choice.label[locale]?.trim().length ?? 0).toBeGreaterThan(0);
+            expect(choice.consequence[locale]?.trim().length ?? 0).toBeGreaterThan(0);
+          }
+        }
+        // `sat` is reserved and unfilled in the MVP.
+        expect(step.instruction.sat).toBeUndefined();
+      }
+    }
+  });
+
+  test("Hindi content is not an English copy", () => {
+    for (const code of MODULE_CODES) {
+      for (const step of MODULES[code]!.steps) {
+        expect(step.instruction.hi).not.toBe(step.instruction.en);
+      }
+    }
+  });
+
+  test("each decide step has exactly one correct choice", () => {
+    for (const code of MODULE_CODES) {
+      for (const step of MODULES[code]!.steps) {
+        if (step.kind !== "decide") continue;
+        expect((step.choices ?? []).filter((c) => c.correct)).toHaveLength(1);
+      }
+    }
+  });
+
+  test("seq is 0-based and contiguous", () => {
+    for (const code of MODULE_CODES) {
+      MODULES[code]!.steps.forEach((step, i) => {
+        expect(step.seq).toBe(i);
+      });
+    }
+  });
+
+  test("the validator actually rejects broken content", () => {
+    const broken = structuredClone(requireModule("FIRE"));
+    // Strip the Hindi instruction from the first step.
+    const first = broken.steps[0]!;
+    delete (first.instruction as { hi?: string }).hi;
+    const issues = validateManifest(broken);
+    expect(issues.some((i) => i.message.includes('instruction has no "hi"'))).toBe(true);
+
+    // Two correct answers on a decide step.
+    const broken2 = structuredClone(requireModule("GAS"));
+    const decide = broken2.steps.find((s) => s.kind === "decide")!;
+    decide.choices![1]!.correct = true;
+    const issues2 = validateManifest(broken2);
+    expect(issues2.some((i) => i.message.includes("exactly one correct choice"))).toBe(true);
+
+    // Critically-flagged step whose failure no longer blocks the certificate.
+    const broken3 = structuredClone(requireModule("FIRE"));
+    const crit = broken3.steps.find((s) => s.critical)!;
+    crit.failure.blocksCertificate = false;
+    const issues3 = validateManifest(broken3);
+    expect(issues3.some((i) => i.message.includes("blocksCertificate is false"))).toBe(true);
+  });
+});
+
+/** Builds a perfect, first-try attempt row for every step of a module. */
+function cleanRun(moduleCode: string): StepAttemptRecord[] {
+  return MODULES[moduleCode]!.steps.map(
+    (step): StepAttemptRecord => ({
+      eventId: `evt-${moduleCode}-${step.id}`,
+      sessionId: "sess-1",
+      moduleCode,
+      moduleVersion: MODULES[moduleCode]!.version,
+      stepId: step.id,
+      stepSeq: step.seq,
+      critical: step.critical,
+      outcome: "pass",
+      attemptIndex: 0,
+      elapsedMs: step.expectedMs ?? 20000,
+      hintUsed: 0,
+      selfRecovered: false,
+      prompted: false,
+      orderViolation: false,
+      offline: false,
+      clientTs: 1_700_000_000_000,
+      locale: "en",
+      maxHints: step.maxHints ?? step.hints.length,
+      expectedMs: step.expectedMs ?? 20000,
+      weight: step.weight ?? 1,
+    }),
+  );
+}
+
+describe("shipped content clears the gate", () => {
+  for (const code of MODULE_CODES) {
+    test(`${code}: a clean first-try run scores 100 and passes`, () => {
+      const result = scoreModule(requireModule(code), cleanRun(code));
+      expect(result.score).toBe(100);
+      expect(result.passed).toBe(true);
+      expect(result.criticalMisses).toBe(0);
+      expect(result.blockedFailures).toBe(0);
+      expect(result.completeness).toBe(1);
+    });
+  }
+
+  test("both modules together pass G1-G8 with no re-check misses", () => {
+    const manifests = MODULE_CODES.map((c) => requireModule(c));
+    const scores = manifests.map((m) => scoreModule(m, cleanRun(m.code)));
+    const overall = scoreOverall(scores);
+
+    const samples = sampleRecheckSteps({ manifests, moduleScores: scores });
+    expect(samples).toHaveLength(4);
+
+    const gate = evaluateGate({
+      manifests,
+      moduleScores: scores,
+      overall,
+      recheck: evaluateRecheck(
+        samples,
+        Object.fromEntries(samples.map((s) => [s.stepId, true])),
+      ),
+    });
+    expect(gate.failed).toEqual([]);
+    expect(gate.passed).toBe(true);
+    expect(gate.criteria).toHaveLength(8);
+  });
+
+  test("the re-check sampler leads with critical steps from real content", () => {
+    const manifests = MODULE_CODES.map((c) => requireModule(c));
+    const scores = manifests.map((m) => scoreModule(m, cleanRun(m.code)));
+    const samples = sampleRecheckSteps({ manifests, moduleScores: scores });
+
+    expect(samples).toHaveLength(4);
+    // Every module contributes its critical core before any spread pick.
+    const criticalPicks = samples.filter((s) => s.reason === "critical-core");
+    expect(criticalPicks.length).toBeGreaterThanOrEqual(2);
+    expect(criticalPicks.every((s) => s.critical)).toBe(true);
+    // Results are sorted by step id and contain no duplicates.
+    expect([...samples].sort((a, b) => a.stepId.localeCompare(b.stepId))).toEqual(samples);
+    expect(new Set(samples.map((s) => s.stepId)).size).toBe(4);
+  });
+});
+
+describe("content reacts to a trainee getting it wrong", () => {
+  test("picking water on A-03 costs the module score and records the misconception", () => {
+    const manifest = requireModule("FIRE");
+    const rows = cleanRun("FIRE");
+    const idx = rows.findIndex((r) => r.stepId === "A-03");
+    const clean = rows[idx]!;
+    // A miss on the first attempt, then an unaided recovery.
+    const failed: StepAttemptRecord = {
+      ...clean,
+      eventId: "evt-A-03-fail",
+      outcome: "fail",
+      attemptIndex: 0,
+      failureKind: "critical",
+      misconception: "water_on_electrical",
+    };
+    const recovery: StepAttemptRecord = {
+      ...clean,
+      eventId: "evt-A-03-retry",
+      outcome: "pass",
+      attemptIndex: 1,
+      selfRecovered: true,
+    };
+    rows.splice(idx, 1, failed, recovery);
+
+    const result = scoreModule(manifest, rows);
+    expect(result.criticalMisses).toBe(1);
+    expect(result.blockedFailures).toBe(1);
+    // The weighted score recovers because the trainee worked it out unaided —
+    // which is exactly why a score alone must never be allowed to issue a
+    // certificate. G3/G4 are what block it.
+    expect(result.score).toBeGreaterThanOrEqual(manifest.passScore);
+    expect(result.score).toBeLessThan(100);
+
+    const stepMetrics = result.steps.find((s) => s.stepId === "A-03")!;
+    expect(stepMetrics.topMisconception).toBe("water_on_electrical");
+    expect(stepMetrics.criticalMiss).toBe(true);
+    expect(stepMetrics.everPassed).toBe(true);
+
+    // The cold re-check samples exactly what went wrong.
+    const samples = sampleRecheckSteps({ manifests: [manifest], moduleScores: [result] });
+    expect(samples.some((s) => s.stepId === "A-03")).toBe(true);
+
+    // ...and failing that same step again cold fails the whole re-check.
+    const outcomes = Object.fromEntries(samples.map((s) => [s.stepId, s.stepId !== "A-03"]));
+    const recheck = evaluateRecheck(samples, outcomes);
+    expect(recheck.passed).toBe(false);
+    expect(recheck.missed).toEqual(["A-03"]);
+    expect(recheck.score).toBeCloseTo(0.75, 5);
+
+    const gate = evaluateGate({
+      manifests: [manifest],
+      moduleScores: [result],
+      overall: scoreOverall([result]),
+      recheck,
+    });
+    expect(gate.passed).toBe(false);
+    // G1 (module score) is still met — G3/G4/G7 are what deny the certificate.
+    expect(gate.criteria.find((c) => c.id === "G1")?.met).toBe(true);
+    expect(gate.failed).toContain("G3");
+    expect(gate.failed).toContain("G4");
+    expect(gate.failed).toContain("G7");
+
+    // Retake the re-check clean and only the hard failures remain.
+    const cleanRecheck = evaluateRecheck(
+      samples,
+      Object.fromEntries(samples.map((s) => [s.stepId, true])),
+    );
+    const afterRecheck = evaluateGate({
+      manifests: [manifest],
+      moduleScores: [result],
+      overall: scoreOverall([result]),
+      recheck: cleanRecheck,
+    });
+    expect(afterRecheck.failed.sort()).toEqual(["G3", "G4"]);
+    expect(afterRecheck.passed).toBe(false);
+  });
+
+  test("an AttemptEvent converted to a record keeps every scored field", () => {
+    const event: AttemptEvent = {
+      eventId: "evt-x",
+      sessionId: "s1",
+      moduleCode: "FIRE",
+      moduleVersion: "1.0.0",
+      stepId: "A-01",
+      stepSeq: 0,
+      critical: false,
+      outcome: "pass",
+      attemptIndex: 0,
+      elapsedMs: 9000,
+      hintUsed: 0,
+      selfRecovered: false,
+      prompted: false,
+      orderViolation: false,
+      offline: true,
+      clientTs: 1,
+      locale: "hi",
+    };
+    // Round-trip through JSON is what the offline queue actually does.
+    const back = JSON.parse(JSON.stringify(event)) as AttemptEvent;
+    expect(back).toEqual(event);
+    expect(back.locale).toBe("hi");
+    expect(back.offline).toBe(true);
+  });
+});
