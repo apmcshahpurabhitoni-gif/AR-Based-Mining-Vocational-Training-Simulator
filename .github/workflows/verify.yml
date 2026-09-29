@@ -1,0 +1,30 @@
+name: verify
+
+# Runs the same three checks a developer runs locally, in one place, so a pull
+# request cannot merge with a broken rubric or a failed content audit.
+#
+# `bun run verify` is deliberately self-contained: it validates the bilingual
+# safety content, runs the scoring/gate/runner unit tests, and typechecks the
+# Convex functions. It needs no database and no network, which is what lets it
+# run on a fork. The end-to-end suite is deliberately excluded — it requires a
+# live Convex deployment, so it is a deployment check rather than a PR check.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Verify content, tests, and types
+        run: bun run verify
