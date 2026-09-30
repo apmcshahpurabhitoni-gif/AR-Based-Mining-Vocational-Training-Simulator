@@ -59,9 +59,50 @@ function start(manifest: ModuleManifest, locale: Locale = "en", at = 1_000_000) 
   return { state, env, advance };
 }
 
+/**
+ * GAS with the pending step treated as if the reviewer had approved it.
+ *
+ * This is a **test fixture**, not content. GAS step 4 is a critical step whose
+ * procedure, scenario and answer key are the safety reviewer's to supply, and
+ * the real manifest is deliberately stuck on that step so no certificate can be
+ * issued for the module. That is correct for the product and useless for tests
+ * of machinery that does not care what the answer is — re-check sampling, gate
+ * thresholds, offline sync, misconception reporting. Those need a module that
+ * can actually be driven to the end, so they use this copy, which marks one
+ * option correct and clears the flag.
+ *
+ * Nothing here reaches a trainee. The shipped manifest stays pending, and
+ * `spec-conformance.test.ts` asserts that it does.
+ */
+const GAS_REVIEWED: ModuleManifest = {
+  ...GAS,
+  steps: GAS.steps.map((step) =>
+    step.pendingSafetyReview
+      ? {
+          ...step,
+          pendingSafetyReview: false,
+          choices: step.choices?.map((c) => ({
+            ...c,
+            correct: c.id === "withdraw-from-hazard",
+            misconception: c.misconception ?? "reviewed-outcome",
+          })),
+        }
+      : step,
+  ),
+};
+
+/** True when the run has stopped at a step nothing can answer. */
+function stalledOnPendingReview(state: RunnerState, manifest: ModuleManifest): boolean {
+  return currentStep(state, manifest)?.pendingSafetyReview === true;
+}
+
 /** Drive the runner through a step correctly. */
 function solveStep(state: RunnerState, env: RunnerEnv, manifest: ModuleManifest, advance: (ms: number) => void) {
   const step = currentStep(state, manifest)!;
+  // A step awaiting the qualified safety reviewer has no approved answer, so
+  // there is nothing to dispatch. This mirrors the product: the training page
+  // renders no options for it, and the runner cannot resolve it.
+  if (step.pendingSafetyReview) return { state, step };
   advance(2000);
   if (step.kind === "observe") {
     for (const target of step.success.requiredTargets ?? []) {
@@ -85,6 +126,9 @@ function runClean(manifest: ModuleManifest, locale: Locale = "en"): RunnerState 
   let guard = 0;
   while (!s.complete) {
     if (++guard > 500) throw new Error("runClean did not terminate");
+    // A "clean run" stops at a step awaiting safety review, because that step
+    // cannot be answered cleanly or otherwise. See GAS_REVIEWED.
+    if (stalledOnPendingReview(s, manifest)) break;
     s = solveStep(s, env, manifest, advance).state;
     s = runnerReduce(s, { type: "continue" }, env, manifest);
   }
@@ -103,6 +147,7 @@ function runWithMistake(manifest: ModuleManifest, wrongStepId: string, wrongChoi
   while (!s.complete) {
     if (++guard > 500) throw new Error("runWithMistake did not terminate");
     const step = currentStep(s, manifest)!;
+    if (step.pendingSafetyReview) break;
     advance(2000);
 
     const firstAttempt = (currentRuntime(s, manifest)?.attemptIndex ?? 0) === 0;
@@ -384,9 +429,33 @@ describe("runner — full runs", () => {
     expect(score.meanHesitation).toBeLessThan(0.5);
   });
 
-  test("a clean run of GAS scores 100", () => {
+  test("GAS cannot be completed, so it cannot be certified", () => {
+    // The real module, not the fixture. docs/13 step 4 is critical and its
+    // procedure has not been approved, so the run stops there — and because the
+    // module is never completed, the gate's existing "every module meets its
+    // pass score" requirement fails on its own. No new gate rule was added for
+    // this; the content simply cannot be finished.
     const s = runClean(GAS);
-    const score = scoreModule(GAS, toStepRecords(s, GAS));
+    expect(s.complete).toBe(false);
+    expect(stalledOnPendingReview(s, GAS)).toBe(true);
+    expect(s.outcomes?.["B-04"]).toBeUndefined();
+
+    const gate = evaluateGate({
+      manifests: [FIRE, GAS],
+      moduleScores: [scoreModule(FIRE, toStepRecords(runClean(FIRE), FIRE))],
+      overall: scoreOverall([scoreModule(FIRE, toStepRecords(runClean(FIRE), FIRE))]),
+      recheck: evaluateRecheck([], {}, 0),
+    });
+    expect(gate.passed).toBe(false);
+    expect(gate.failed).toContain("G1");
+  });
+
+  test("a clean run of GAS scores 100 once step 4 is approved", () => {
+    // The promise the demo and the certificate make, held against the module as
+    // it will be after review. See GAS_REVIEWED for why the shipped manifest is
+    // not the one being driven here.
+    const s = runClean(GAS_REVIEWED);
+    const score = scoreModule(GAS_REVIEWED, toStepRecords(s, GAS_REVIEWED));
     expect(score.score).toBe(100);
   });
 
@@ -401,9 +470,10 @@ describe("runner — full runs", () => {
     expect(metrics.topMisconception).toBe("water_on_electrical");
     expect(metrics.criticalMiss).toBe(true);
 
-    // Solo entry is the GAS equivalent.
-    const g = runWithMistake(GAS, "B-03", "solo-fast");
-    const gScore = scoreModule(GAS, toStepRecords(g, GAS));
+    // Solo entry is the GAS equivalent. Driven against the reviewed fixture so
+    // the run reaches step 4; the misconception being reported is from step 3.
+    const g = runWithMistake(GAS_REVIEWED, "B-03", "solo-fast");
+    const gScore = scoreModule(GAS_REVIEWED, toStepRecords(g, GAS_REVIEWED));
     expect(gScore.steps.find((m) => m.stepId === "B-03")!.topMisconception).toBe("solo_entry");
     expect(gScore.criticalMisses).toBe(1);
   });
@@ -491,7 +561,10 @@ describe("runner — cold re-check", () => {
   }
 
   test("a fully retained re-check passes", () => {
-    const { state, samples } = runRecheck([FIRE, GAS]);
+    // Driven against the reviewed GAS fixture: these three tests are about
+    // sampling, scoring and gate thresholds, none of which care what step 4
+    // says. See GAS_REVIEWED.
+    const { state, samples } = runRecheck([FIRE, GAS_REVIEWED]);
     expect(state.complete).toBe(true);
     expect(isFullyGraded(state, { ...FIRE, steps: FIRE.steps.filter((s) => samples.some((x) => x.stepId === s.id)) })).toBe(true);
     const result = evaluateRecheck(samples, recheckOutcomes(state));
@@ -500,7 +573,7 @@ describe("runner — cold re-check", () => {
   });
 
   test("one missed sample fails the whole re-check — no retries", () => {
-    const { state, samples } = runRecheck([FIRE, GAS], ["A-03"]);
+    const { state, samples } = runRecheck([FIRE, GAS_REVIEWED], ["A-03"]);
     const result = evaluateRecheck(samples, recheckOutcomes(state));
     expect(result.passed).toBe(false);
     expect(result.missed).toEqual(["A-03"]);
@@ -510,8 +583,8 @@ describe("runner — cold re-check", () => {
   });
 
   test("a failed re-check blocks the certificate even after perfect training", () => {
-    const { state, samples } = runRecheck([FIRE, GAS], ["B-03"]);
-    const manifests = [FIRE, GAS];
+    const { state, samples } = runRecheck([FIRE, GAS_REVIEWED], ["B-03"]);
+    const manifests = [FIRE, GAS_REVIEWED];
     const moduleScores = manifests.map((m) => scoreModule(m, toStepRecords(runClean(m), m)));
     const recheck = evaluateRecheck(samples, recheckOutcomes(state));
 
@@ -587,9 +660,21 @@ describe("runner — guards", () => {
     expect(records.every((r) => r.weight >= 1 && r.maxHints >= 0)).toBe(true);
   });
 
-  test("every shipped step is solvable in both shipped modules", () => {
+  test("every shipped step is answerable, except those deliberately pending review", () => {
+    // The exception is the point: a step awaiting the qualified safety reviewer
+    // is *supposed* to be unanswerable, and this asserts that it is unanswerable
+    // for the right reason — no approved answer, so nothing marked correct —
+    // rather than by being quietly empty or dropped.
     for (const manifest of Object.values(MODULES)) {
       for (const step of manifest.steps as Step[]) {
+        if (step.pendingSafetyReview) {
+          if (step.kind === "decide") {
+            expect(step.choices!.filter((c) => c.correct)).toHaveLength(0);
+            expect(step.choices!.length).toBeGreaterThan(1);
+          }
+          expect(step.critical).toBe(true);
+          continue;
+        }
         if (step.kind === "decide") {
           expect(step.choices!.filter((c) => c.correct)).toHaveLength(1);
         }

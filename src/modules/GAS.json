@@ -230,43 +230,60 @@
       "id": "B-04",
       "moduleCode": "GAS",
       "seq": 3,
-      "kind": "observe",
-      "critical": false,
+      "kind": "decide",
+      "critical": true,
+      "pendingSafetyReview": true,
       "instruction": {
-        "en": "Mark the hazard zone",
-        "hi": "खतरे का इलाका चिन्हित करो"
+        "en": "PENDING QUALIFIED SAFETY REVIEW (docs/13 step 4). Withdraw from, or remain outside, the defined hazardous area as instructed. The approved procedure has not been supplied, so this step is not presented to trainees and GAS cannot be certified until it is. Every option below is a candidate for the reviewer, not an approved answer.",
+        "hi": "योग्य सुरक्षा समीक्षा लंबित (docs/13 चरण 4)। निर्धारित खतरा क्षेत्र से बाहर निकलो या बाहर ही रहो, जैसा निर्देश हो। मंजूर प्रक्रिया अभी उपलब्ध नहीं है, इसलिए यह चरण प्रशिक्षितों को नहीं दिखाया जाता और स्वीकृति तक GAS प्रमाणपत्र नहीं जारी हो सकता। नीचे दिए गए सभी विकल्प समीक्षक के लिए उम्मीदवार हैं, स्वीकृत उत्तर नहीं।"
       },
       "narrationKey": "B-04",
-      "targets": [
+      "choices": [
         {
-          "id": "zone-barrier",
-          "sprite": "zone-barrier",
-          "label": {
-            "en": "Hazard zone barrier",
-            "hi": "खतरा क्षेत्र बैरियर"
-          },
-          "position": { "x": 0.68, "y": 0.52 }
+          "id": "withdraw-from-hazard",
+          "label": { "en": "Withdraw from the hazardous area", "hi": "खतरा क्षेत्र से बाहर निकलो" },
+          "correct": false,
+          "consequence": {
+            "en": "Pending safety review — not evaluated.",
+            "hi": "सुरक्षा समीक्षा लंबित — मूल्यांकन नहीं किया गया।"
+          }
+        },
+        {
+          "id": "remain-outside-barrier",
+          "label": { "en": "Remain outside the barrier", "hi": "बैरियर के बाहर ही रहो" },
+          "correct": false,
+          "consequence": {
+            "en": "Pending safety review — not evaluated.",
+            "hi": "सुरक्षा समीक्षा लंबित — मूल्यांकन नहीं किया गया।"
+          }
+        },
+        {
+          "id": "enter-to-investigate",
+          "label": { "en": "Enter to investigate the reading", "hi": "जाँच के लिए अंदर जाओ" },
+          "correct": false,
+          "misconception": "unsafe-entry",
+          "consequence": {
+            "en": "Pending safety review — not evaluated. Recorded here because docs/13 requires this step to capture the misconception of entering a suspected hazardous atmosphere, not to permit it.",
+            "hi": "सुरक्षा समीक्षा लंबित — मूल्यांकन नहीं किया गया। यहाँ दर्ज इसलिए कि docs/13 को इस चरण में संदिग्ध खतरनाक वायुमंडल में प्रवेश की गलत धारणा को पकड़ना आवश्यक है, उसे स्वीकार करना नहीं।"
+          }
         }
       ],
       "success": {
-        "type": "identify",
-        "requiredTargets": ["zone-barrier"]
+        "type": "select"
       },
       "failure": {
-        "kind": "penalty",
+        "kind": "critical",
         "consequence": {
-          "en": "Mark the boundary so no one walks in.",
-          "hi": "सीमा चिन्हित करो ताकि कोई अंदर न जाए।"
+          "en": "Pending safety review — this step cannot yet fail a trainee, because no approved answer exists to fail against.",
+          "hi": "सुरक्षा समीक्षा लंबित — अभी यह चरण किसी प्रशिक्षित को अनुतीर्ण नहीं कर सकता, क्योंकि अनुतीर्ण करने के लिए कोई स्वीकृत उत्तर मौजूद नहीं है।"
         },
         "requiresRetry": true,
-        "blocksCertificate": false
+        "blocksCertificate": true
       },
-      "hints": [
-        { "en": "Tape or barricade, at the edge of the reading.", "hi": "टेप या बैरिकेड, रीडिंग के किनारे पर।" }
-      ],
-      "maxHints": 1,
-      "expectedMs": 15000,
-      "weight": 1
+      "hints": [],
+      "maxHints": 0,
+      "expectedMs": 20000,
+      "weight": 3
     },
     {
       "id": "B-05",

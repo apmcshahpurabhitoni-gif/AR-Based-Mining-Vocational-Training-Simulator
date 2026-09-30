@@ -69,6 +69,15 @@ export function objectsForStep(
   locale: string,
   actionCursor = 0,
 ): RoomObject[] {
+  //
+  // A step awaiting the qualified safety reviewer produces no room at all.
+  //
+  // Not an empty scene to look at, and not a "disabled" scene: nothing to tap,
+  // nothing for the raycaster to return, and therefore no path by which a
+  // placeholder answer could reach `runner.ts` and be recorded against a
+  // trainee. The candidates in the manifest stay candidates.
+  if (step.pendingSafetyReview) return [];
+
   if (step.kind === "decide") {
     return (step.choices ?? []).map((c) => ({
       id: c.id,

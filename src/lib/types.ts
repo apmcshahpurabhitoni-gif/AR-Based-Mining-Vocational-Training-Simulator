@@ -99,6 +99,31 @@ export interface Step {
   instruction: Localised;
   narrationKey: string;
 
+  /**
+   * This step's content exists but has not been approved by the qualified
+   * safety reviewer (docs/12 and docs/13 both call that review a release
+   * blocker).
+   *
+   * The flag means the *shape* is settled and the *content* is not. A step
+   * carrying it:
+   *   - keeps its place in the sequence, so the gap is visible where it is;
+   *   - produces no room objects, so nothing about it can be tapped or graded;
+   *   - is never presented for answering, so it can never be resolved;
+   *   - and therefore can never be completed, which makes the existing
+   *     "every module meets its pass score" requirement in the gate fail
+   *     closed on its own. No new gate rule is added for it.
+   *
+   * It exists because of GAS step 4. docs/13 makes "withdraw or remain outside
+   * the defined hazardous area" a critical step, and the simulator must never
+   * imply that an untrained worker should enter a suspected hazardous
+   * atmosphere. KAVACH had no such step at all — an optional "mark the barrier"
+   * observation stood in its place, so a trainee who never learned to withdraw
+   * could pass GAS and be issued a certificate. Authoring the procedure is the
+   * safety reviewer's job, not a renderer's, so the step is present, labelled
+   * as unreviewed, and fails closed until the approved procedure arrives.
+   */
+  pendingSafetyReview?: boolean;
+
   targets?: MarkerTarget[];
   action?: ActionSpec;
   choices?: DecisionChoice[];

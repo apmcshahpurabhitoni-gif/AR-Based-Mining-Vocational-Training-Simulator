@@ -102,6 +102,16 @@ export const INTERACTABLES: Readonly<Record<string, readonly string[]>> = {
     "solo-fast",
     "three-buddy",
     "supervisor-inside",
+    // B-04 withdrawal / remain outside. The three outcomes docs/13 names for
+    // this step, added with it. They are candidates for the safety reviewer,
+    // not an approved procedure: the step carries `pendingSafetyReview`, so
+    // none of them is ever put in front of a trainee and none is ever scored.
+    // `enter-to-investigate` is in the vocabulary precisely so that the
+    // misconception docs/13 forbids has a name, and so a reviewer can see the
+    // unsafe answer the step is expected to capture.
+    "withdraw-from-hazard",
+    "remain-outside-barrier",
+    "enter-to-investigate",
     // B-05 isolation
     "valve-main",
     "valve-isolate",

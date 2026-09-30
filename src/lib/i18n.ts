@@ -120,6 +120,9 @@ export type UiKey =
   | "training.tapTarget"
   | "training.tapInOrder"
   | "training.chooseOne"
+  | "training.pendingReview.title"
+  | "training.pendingReview.body"
+  | "training.pendingReview.hold"
   | "training.queueSaved"
   | "training.syncing"
   | "training.pass"
@@ -307,6 +310,18 @@ export const UI: Strings = {
   "training.tapTarget": { en: "Tap what the instruction asks for", hi: "जो निर्देश कहे उसे टैप करो" },
   "training.tapInOrder": { en: "Tap these in order", hi: "इन्हें क्रम में टैप करो" },
   "training.chooseOne": { en: "Choose one", hi: "एक चुनो" },
+  "training.pendingReview.title": {
+    en: "Awaiting qualified safety review",
+    hi: "योग्य सुरक्षा समीक्षा लंबित",
+  },
+  "training.pendingReview.body": {
+    en: "This step is in the module because the specification requires it, but no approved procedure exists for it yet, so it cannot be answered. Training stops here, and no certificate can be issued for this module until the safety reviewer supplies it. Nothing on this screen has been assessed.",
+    hi: "यह चरण इसलिए मौजूद है क्योंकि विनिर्देश इसे आवश्यक बताता है, पर इसके लिए अभी कोई स्वीकृत प्रक्रिया नहीं है, इसलिए इसका उत्तर नहीं दिया जा सकता। प्रशिक्षण यहीं रुकता है, और सुरक्षा समीक्षक द्वारा प्रक्रिया दिए जाने तक इस मॉड्यूल का कोई प्रमाणपत्र जारी नहीं हो सकता। इस स्क्रीन की कुछ भी मूल्यांकित नहीं किया गया है।",
+  },
+  "training.pendingReview.hold": {
+    en: "Training cannot continue past this step",
+    hi: "प्रशिक्षण इस चरण से आगे नहीं बढ़ सकता",
+  },
   "training.queueSaved": {
     en: "Saved on this device. Will sync when back online.",
     hi: "इस डिवाइस पर सहेजा गया। ऑनलाइन होने पर सिंक होगा।",
