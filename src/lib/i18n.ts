@@ -48,6 +48,9 @@ export type UiKey =
   | "landing.feature.offline.body"
   | "landing.feature.nohelmet.title"
   | "landing.feature.nohelmet.body"
+  | "landing.status.title"
+  | "landing.status.body"
+  | "landing.step.train.body"
   | "landing.feature.bilingual.title"
   | "landing.feature.bilingual.body"
   | "auth.signIn.title"
@@ -164,6 +167,25 @@ export const UI: Strings = {
     hi: "खदानों और कारखानों के लिए बिना हेडसेट वाली AR सुरक्षा प्रशिक्षण। उद्योग में कोई प्रतिधारण प्रमाणित नहीं करता। कवच करता है — और हर प्रमाणपत्र पर QR है जिसे बिना नेटवर्क के भी स्कैन किया जा सकता है।",
   },
   "landing.cta.primary": { en: "Start certification", hi: "प्रमाणन शुरू करें" },
+  /**
+   * Pre-pilot disclosure.
+   *
+   * The hero promises a certificate. Today the platform will not issue one,
+   * because one required module has a step the safety reviewer has not
+   * approved, and a module that cannot be completed is a module that cannot be
+   * certified. That is the gate working, not the product being broken — but a
+   * trainee who starts a certification they cannot finish was told something
+   * untrue by this page, so the page says so.
+   */
+  "landing.status.title": { en: "Pre-pilot build", hi: "पायलट-पूर्व संस्करण" },
+  "landing.status.body": {
+    en: "No certificate can be issued yet. One required module has a step awaiting qualified safety review, so that module cannot be completed — and a module that cannot be completed cannot be certified. Fire and explosion is complete and matches its specification. Nothing here is marked validated that is not.",
+    hi: "अभी कोई प्रमाणपत्र जारी नहीं किया जा सकता। एक आवश्यक मॉड्यूल में एक चरण योग्य सुरक्षा समीक्षा की प्रतीक्षा कर रहा है, इसलिए वह मॉड्यूल पूरा नहीं हो सकता — और जो मॉड्यूल पूरा नहीं हो सकता, उसका प्रमाणन नहीं हो सकता। अग्नि एवं विस्फोट पूरा है और अपने विनिर्देश से मेल खाता है। यहाँ कुछ भी अप्रमाणित दावा नहीं किया गया है।",
+  },
+  "landing.step.train.body": {
+    en: "Fire and explosion, then gas leak and confined space. Every step is graded, and a first-try miss on a critical step is recorded permanently. One gas step is still with the safety reviewer and is not yet trainable.",
+    hi: "अग्नि एवं विस्फोट, फिर गैस रिसाव एवं बंद जगह। प्रत्येक चरण का मूल्यांकन होता है, और किसी गंभीर चरण पर पहली बार की गलती स्थायी रूप से दर्ज होती है। गैस का एक चरण अभी सुरक्षा समीक्षक के पास है और अभी प्रशिक्षण योग्य नहीं है।",
+  },
   "landing.cta.secondary": { en: "Verify a certificate", hi: "प्रमाणपत्र जाँचें" },
   "landing.stat.certificates": { en: "certificates issued", hi: "प्रमाणपत्र जारी" },
   "landing.stat.trainees": { en: "trainees enrolled", hi: "प्रशिक्षणार्थी" },

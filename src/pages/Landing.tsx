@@ -20,6 +20,7 @@ import {
   QrCode,
   ShieldCheck,
   ThermometerSun,
+  TriangleAlert,
 } from "lucide-react";
 import { useSession, useT } from "../lib/session";
 import { Button, Chip, LinkButton } from "../components/ui";
@@ -207,6 +208,27 @@ export function Landing() {
             <h2 className="text-3xl font-semibold tracking-tight text-fog-50 sm:text-4xl">
               Four steps between you and a certificate you can defend
             </h2>
+            {/*
+             * The pre-pilot disclosure.
+             *
+             * This page promises a certificate at the top and in the call to
+             * action, and the platform will not issue one today: a required
+             * module has a step the safety reviewer has not approved, so it
+             * cannot be completed, and a module that cannot be completed cannot
+             * be certified. The gate is doing exactly what it was built to do.
+             * Leaving that off this page would mean inviting a real trainee into
+             * a certification they cannot finish, on the strength of a promise
+             * the product cannot keep yet.
+             */}
+            <div className="mt-6 max-w-2xl rounded-lg border border-warn-400/30 bg-warn-400/5 p-4">
+              <p className="flex items-center gap-2 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-warn-400">
+                <TriangleAlert className="h-4 w-4" />
+                {t("landing.status.title")}
+              </p>
+              <p className="mt-2 text-sm leading-relaxed text-fog-300">
+                {t("landing.status.body")}
+              </p>
+            </div>
           </div>
 
           <ol className="grid gap-px overflow-hidden rounded-xl border border-ink-700 bg-ink-700 sm:grid-cols-2 lg:grid-cols-4">
@@ -214,7 +236,7 @@ export function Landing() {
               {
                 n: "01",
                 title: "Train both modules",
-                body: "Fire and explosion, then gas leak and confined space. Every step is graded, and a first-try miss on a critical step is recorded permanently.",
+                body: t("landing.step.train.body"),
               },
               {
                 n: "02",
