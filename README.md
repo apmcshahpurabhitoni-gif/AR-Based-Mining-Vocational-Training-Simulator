@@ -19,7 +19,8 @@ Government of Jharkhand · Mining & Manufacturing
 | `src/lib/scoring.ts` — the rubric | **Done** | 40 unit tests + integration |
 | `src/lib/gate.ts` — G1–G8 + cold re-check | **Done** | 24 unit tests + integration |
 | `convex/attempts.ts` — idempotent ingest + authoritative scoring | **Done** | 9-check live-DB self-test |
-| Module manifests (`FIRE.json`, `GAS.json`) | **Next** | — |
+| Module manifests (`FIRE.json`, `GAS.json`) | **Done** | `spec-conformance.test.ts` vs docs/12 + docs/13 |
+| GAS step 4 (withdraw / remain outside) | **Blocked** — awaiting qualified safety review | fails closed: no certificate for GAS until supplied |
 
 ```
 bun test          # 75 unit + integration tests
@@ -70,7 +71,7 @@ crew is failing.
 | Code | Domain | Steps | Critical steps |
 |---|---|---|---|
 | `FIRE` | Fire & explosion — exit ID, extinguisher selection + PASS, evacuation order | 6 | A-03, A-05 |
-| `GAS` | Gas leak & confined space — hazard zone, PPE, buddy entry, isolation | 6 | B-02, B-03, B-05 |
+| `GAS` | Gas leak & confined space — warning condition, PPE, buddy entry, withdrawal *(step 4 pending safety review)*, isolation, report | 6 | B-02, B-03, B-04, B-05 |
 | `LOTO` | Declared, not built — the statement is truncated at domain 3 of 5 | — | — |
 | *`sat` locale* | Declared, not built — one JSON file and audio away | — | — |
 
