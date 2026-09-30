@@ -5,7 +5,7 @@ installable as a file a trainee can be handed: the Android wrapper, and how a
 build of it actually happens.
 
 **Status: a debug-signed APK has been built and verified.** `KAVACH-0.1.0-debug.apk`,
-11.6 MB, `in.gov.sih26041.kavach`, signed with the Android debug certificate,
+**5.5 MB**, `in.gov.sih26041.kavach`, signed with the Android debug certificate,
 containing the web bundle and the launcher icons. It has **not** been run on a
 handset — see §5, which is the honest list of what is still unproven.
 
@@ -68,6 +68,17 @@ someone else, because the artefact is traceable to a commit.
 It is a **debug-signed** APK. That is the right artefact for a pilot: Android
 signs debug builds with a keystore Gradle generates on the spot, so it installs
 by sideload with no signing key, no store account and nothing to keep safe.
+
+**It builds clean every time, and the size depends on that.** Gradle's
+incremental packager appends to the APK and does not always reclaim the space
+when an input shrinks. Building repeatedly while the bundle changed — which is
+exactly what a developer does, and what dropping source maps does — left
+orphaned blocks behind: identical entries in the central directory, in a file
+twice the size. The same code built once on a clean checkout is 5.5 MB; built
+nine times it was 10.7 MB. `scripts/build-apk.sh` therefore runs `clean
+assembleDebug`, so the artefact does not depend on how many times you have built
+before. It costs about thirty seconds and it is the difference between an APK
+whose size means something and one that does not.
 
 - **Over USB**: enable Developer options and USB debugging on the handset, plug
   it in, and run `adb install -r KAVACH-0.1.0-debug.apk`.

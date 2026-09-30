@@ -116,7 +116,21 @@ bunx cap sync android
 echo "sdk.dir=$ANDROID_SDK" > android/local.properties
 
 say "Assembling the debug APK"
-(cd android && ./gradlew --no-daemon assembleDebug)
+#
+# `clean` is not optional and not superstition.
+#
+# Gradle's incremental packager appends to the APK and does not always reclaim
+# the space when an input shrinks. Building repeatedly while the bundle changed
+# — which is what a developer does, and what a source map deletion does — left
+# orphaned deflate blocks behind: the same content in the central directory,
+# and a file twice the size it should be. A build that had only ever run once,
+# on a clean checkout, was 5.5 MB; the same code built nine times was 10.7 MB,
+# byte-for-byte the same entries.
+#
+# So the artefact does not depend on how many times you have built before. It
+# costs about thirty seconds and it is the difference between an APK whose size
+# means something and one that does not.
+(cd android && ./gradlew --no-daemon clean assembleDebug)
 
 version="$(grep -m1 '"version"' package.json | cut -d'"' -f4)"
 apk="android/app/build/outputs/apk/debug/app-debug.apk"
