@@ -1,8 +1,27 @@
 # 08 — Demo Script & Pitch
 
-**Project:** KAVACH · **Version:** 2.0 · **Date:** 2026-09-29
-**Revision:** Santali removed from the demo; L2 reticle is the demo path
+**Project:** KAVACH · **Version:** 2.1 · **Date:** 2026-09-30
+**Revision:** Santali removed from the demo; L2 reticle is the demo path. Then: the
+climax moved, because the build no longer issues a certificate and the strongest
+available beat is the refusal. See §1.1.
 **Governed by:** [01](./01-gap-analysis.md) §5–6
+
+> ### 1.1 This build issues no certificate — demo the refusal instead
+>
+> One required module, GAS, has a step the qualified safety reviewer has not
+> approved (`docs/13` step 4: withdraw from, or remain outside, the defined
+> hazardous area). That step is deliberately present, critical, and inert: it
+> cannot be answered, so the module cannot be completed, and a module that
+> cannot be completed cannot clear the gate. Because the gate requires **every**
+> bundled module, **no certificate issues at all today** — not even for a
+> trainee who completes Fire perfectly.
+>
+> That is the gate working, not the product failing. **Do not rehearse a
+> certificate that will not appear.** The revised 1:20–2:00 sequence below
+> ends on the refusal, which for a safety-certification product is a better
+> answer than a QR code anyway: you are showing an inspector-facing credential
+> that refuses to exist when a module is unapproved. Once the reviewer signs off
+> step 4, restore the certificate beats from version 2.0.
 
 ---
 
@@ -36,28 +55,38 @@ materials** — the demo runs on L2 reticle, which needs nothing prepared.
 1:05  Module B, fast — gas leak, PPE, buddy system.
       They fail B-03 (solo entry). Hard block. "Nobody enters alone."
 
-1:20  COLD RE-CHECK. "Ab hum attendance nahi, yaad test kar rahe hain."
-      A step they got right minutes ago. They fail it — cold.
-      Score drops, gate holds.
-      "Immersive training everywhere else gives you a certificate for
-       being there. We just failed them for forgetting."
+1:20  They reach B-04. The screen does not offer options. It says, in Hindi,
+      that the step is awaiting qualified safety review and that nothing on
+      this screen has been assessed.
       >>> This is the intellectual kill shot. <<<
 
-1:40  They retry, pass, certificate issues. QR on screen.
+1:35  "Yeh step kisi engineer ne approve nahi kiya hai. Isliye isko hum
+       sikhaate nahi, aur iske bina gas module poora hi nahi hota."
+       [That step has not been approved by a safety engineer. So we do not
+        teach it, and without it the gas module cannot be completed.]
 
-1:50  Second phone scans the QR — in a different hand, no login, no signal.
-      VALID. Name, worker code, site, both modules, dates. In Hindi.
+1:45  Result screen. The gate lists G1 unmet. Certificate: REFUSED.
+      "Aapne perfect training kiya — aur certificate nahi mila. Yehhi
+       reason hai ki yeh attendance receipt nahi hai."
+       [You did perfect training — and got no certificate. That is exactly
+        why this is not an attendance receipt.]
 
-2:00  "That's the whole loop. One phone, no headset, no install, no licence."
+2:00  "Every other system would have issued it. We didn't. Jab tak har
+       zaroori module safety-approved nahi hota, hum certificate nahi
+       dete. One phone, no headset, no install, no licence."
 ```
 
-### The two beats that matter
+### The three beats that matter
 
 1. **A-03 wrong answer → LOCKED → correct → unlocked.** Proves the assessment is a gate.
-2. **Cold re-check failure.** Proves this is not attendance theatre. This is the beat no
-   competitor has, and it lands the Msweli et al. (2026) finding live.
+2. **B-04 will not be trained and will not be certified.** Proves the gate covers
+   *content approval*, not just trainee performance. Restore the cold re-check
+   failure as the third beat once step 4 is signed off.
+3. **Cold re-check failure.** *(requires an approved GAS step 4)* Proves this is not
+   attendance theatre. This is the beat no competitor has, and it lands the Msweli
+   et al. (2026) finding live.
 
-**Everything else is supporting evidence. Do not reorder these two.**
+**Everything else is supporting evidence. Do not reorder these.**
 
 ---
 
@@ -209,16 +238,18 @@ half-translates and hides it has told the judge the safety review was skipped.
 | **Audio missing** | English audio with Hindi text on screen. Say it's partial. |
 | **App crashes** | Have a 30-second screen recording as the fallback. Do not debug live. |
 | **Judge's phone is ancient** | L3 handles it. This is why the ladder exists. |
-| **Ran out of time** | Jump straight to the cold re-check. It's the strongest 20 seconds. |
+| **Ran out of time** | Jump straight to the B-04 refusal. It's the strongest 20 seconds *in this build*. |
+| **Asked why there is no certificate** | Answer directly before they ask: one required module has a step the safety reviewer has not approved, so it cannot be certified, so nothing is. It is the gate refusing on purpose. Do not apologise for it. |
 
 **Pre-demo checklist, every time:**
 
 - [ ] Deployed to HTTPS, loaded once on the demo phone
+- [ ] **You have read §1.1 and you are not going to try to issue a certificate**
 - [ ] Airplane mode tested end-to-end
 - [ ] Camera permission flow tested fresh
 - [ ] L2 runs the full 120 seconds cleanly *(the critical gate — no markers, no setup)*
 - [ ] L3 verified on a desktop with the camera disabled
-- [ ] Second phone on the verify page, scanner working
+- [ ] Second phone on the verify page, scanner working *(unused until step 4 is approved)*
 - [ ] Dashboard seeded and showing the heatmap
 - [ ] Language preset to Hindi
 - [ ] Audio all loaded (no buffering)
