@@ -21,8 +21,13 @@ import gasJson from "../modules/GAS.json";
  * fail that blocks certification regardless of overall score. The list lives
  * here rather than only in the JSON so the validator can prove the content
  * still matches what the spec approved — see docs/06-content-spec.md §4.
+ *
+ * `B-04` was added because docs/13 §"Six-step structure" makes GAS step 4 —
+ * "withdraw or remain outside the defined hazardous area" — critical, and the
+ * manifest did not. The roster tracks the specs; `src/lib/spec-conformance.test.ts`
+ * transcribes both step tables and fails on any drift that is not declared.
  */
-export const APPROVED_CRITICAL_STEPS = ["A-03", "A-05", "B-02", "B-03", "B-05"] as const;
+export const APPROVED_CRITICAL_STEPS = ["A-03", "A-05", "B-02", "B-03", "B-04", "B-05"] as const;
 export type ApprovedCriticalStep = (typeof APPROVED_CRITICAL_STEPS)[number];
 
 /** A JSON import is structurally `any`; assert the shape once, here. */

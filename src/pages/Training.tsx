@@ -395,6 +395,34 @@ export function Training({ manifest: manifestProp, phase = "training", sample, o
         )}
       </div>
 
+      {/*
+       * A step awaiting the qualified safety reviewer replaces the whole
+       * training surface — scene, options, hints, everything.
+       *
+       * Not a disabled version of the normal screen. There is no answer to
+       * give, so nothing is rendered that could be tapped, and because the step
+       * can never be resolved the runner never advances past it and the module
+       * can never be completed. A trainee who reaches this sees the reason in
+       * their own language instead of a screen that quietly accepts anything.
+       */}
+      {step.pendingSafetyReview ? (
+        <div className="panel border-warn-400/40 p-8 text-center">
+          <p className="mx-auto flex w-fit items-center gap-2 font-mono text-[11px] uppercase tracking-widest text-warn-400">
+            <TriangleAlert className="h-4 w-4" />
+            {t("training.pendingReview.title")}
+          </p>
+          <p className="mx-auto mt-4 max-w-2xl text-lg leading-snug text-fog-100">
+            {localise(step.instruction, locale)}
+          </p>
+          <p className="mx-auto mt-4 max-w-2xl text-sm leading-relaxed text-fog-400">
+            {t("training.pendingReview.body")}
+          </p>
+          <p className="mt-6 font-mono text-[11px] uppercase tracking-wider text-fog-700">
+            {t("training.pendingReview.hold")}
+          </p>
+        </div>
+      ) : (
+        <>
       {/* -- Scene ------------------------------------------------------- */}
       <div className="panel overflow-hidden">
         {showAR ? (
@@ -531,6 +559,8 @@ export function Training({ manifest: manifestProp, phase = "training", sample, o
           )}
         </aside>
       </div>
+        </>
+      )}
 
       {/* -- Feedback ---------------------------------------------------- */}
       {runtime?.resolved && <Feedback runtime={runtime} step={step} onContinue={() => dispatch({ type: "continue" })} t={t} />}

@@ -22,6 +22,40 @@ export interface ContentIssue {
   message: string;
 }
 
+/**
+ * Steps that are allowed to exist with no approved answer yet.
+ *
+ * A step here is present, correctly shaped, correctly critical, and
+ * deliberately unwinnable. The flag is a safety valve, not a convenience: it
+ * says "the qualified reviewer has not supplied this yet", and the whole
+ * system treats that as a hard stop. So the list is an allowlist of exactly the
+ * gaps we know about, each with the reason it exists — adding a *new* pending
+ * step fails this check, which means a placeholder can never be slipped in
+ * quietly. Closing an entry is a one-line deletion once the content lands.
+ */
+const PENDING_SAFETY_REVIEW: Readonly<Record<string, string>> = {
+  "GAS/B-04":
+    "docs/13 makes GAS step 4 (withdraw or remain outside the hazardous area) critical, and requires " +
+    "this step to capture the misconception of entering a suspected hazardous atmosphere. The approved " +
+    "procedure, the scenario that decides between withdrawing and remaining, and the answer key are all " +
+    "the safety reviewer's to supply. Until they are, the step must be visible and blocking rather than " +
+    "silently absent — before this, KAVACH had no withdrawal step at all and a trainee who never learned " +
+    "to withdraw could still be issued a GAS certificate.",
+};
+
+/**
+ * The word a placeholder must carry in its instruction, per shipped locale.
+ *
+ * Per locale rather than one English string, because "unreviewed" has to be
+ * declared in the language the trainee is actually reading. Checking for the
+ * English word in a Hindi string would let a Hindi trainee meet an unreviewed
+ * step that never said so.
+ */
+const PENDING_MARKERS: Readonly<Record<string, string>> = {
+  en: "PENDING",
+  hi: "लंबित",
+};
+
 function checkLocalised(
   where: string,
   field: string,
@@ -102,6 +136,44 @@ export function validateManifest(manifest: ModuleManifest): ContentIssue[] {
       issues.push({ where, message: "narrationKey is empty" });
     }
 
+    // -- pending safety review ---------------------------------------------
+    // A step awaiting the qualified reviewer is checked differently, and the
+    // difference is deliberate. Everything that can be known without the
+    // reviewer — ids, vocabulary, localisation, shape — is enforced exactly as
+    // for any other step. What cannot be known is which answer is right, so
+    // the two rules that need an answer key are not applied to it: "exactly one
+    // correct choice" and "every wrong choice carries a misconception". Asserting
+    // them would mean inventing a safety answer, which is the one thing this
+    // project must not do.
+    const pending = step.pendingSafetyReview === true;
+    if (pending) {
+      if (!PENDING_SAFETY_REVIEW[where]) {
+        issues.push({
+          where,
+          message:
+            "is flagged pendingSafetyReview but is not on the PENDING_SAFETY_REVIEW allowlist in " +
+            "src/lib/validate-content.ts — either the review has landed and the flag should be removed, " +
+            "or the new gap needs to be declared here with its reason",
+        });
+      }
+      for (const locale of SHIPPED_LOCALES) {
+        const text = step.instruction[locale] ?? "";
+        if (!text.includes(PENDING_MARKERS[locale] ?? PENDING_MARKERS.en!)) {
+          issues.push({
+            where,
+            message: `instruction.${locale} does not declare the step as pending review — an unreviewed step must label itself, in every shipped locale`,
+          });
+        }
+      }
+      // A step that cannot be answered must not be one you can sail past.
+      if (!step.failure.blocksCertificate) {
+        issues.push({
+          where,
+          message: "is pending safety review but its failure does not block the certificate",
+        });
+      }
+    }
+
     // -- shape matches kind -------------------------------------------------
     // Everything this step can be answered with must be drawable in the 3D
     // training environment. docs/12 and docs/13 both require all six steps of a
@@ -115,7 +187,7 @@ export function validateManifest(manifest: ModuleManifest): ContentIssue[] {
         issues.push({ where, message: "decide step needs at least 2 choices" });
       }
       const correct = choices.filter((c) => c.correct);
-      if (correct.length !== 1) {
+      if (!pending && correct.length !== 1) {
         issues.push({
           where,
           message: `decide step must have exactly one correct choice (found ${correct.length})`,
@@ -136,7 +208,9 @@ export function validateManifest(manifest: ModuleManifest): ContentIssue[] {
         checkLocalised(where, `choice "${choice.id}".label`, choice.label, issues);
         checkLocalised(where, `choice "${choice.id}".consequence`, choice.consequence, issues);
         // C8: a wrong answer with no misconception tag is a dead heatmap cell.
-        if (!choice.correct && !choice.misconception) {
+        // A pending step has no wrong answers yet — it has candidates, and the
+        // reviewer decides which are which.
+        if (!choice.correct && !choice.misconception && !pending) {
           issues.push({
             where,
             message: `wrong choice "${choice.id}" has no misconception tag (C8)`,

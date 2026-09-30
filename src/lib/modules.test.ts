@@ -134,12 +134,30 @@ describe("content validation", () => {
     // environment." docs/13: "All six steps use semantic actions compatible
     // with the 3D training environment." This is the acceptance evidence for
     // both — it fails if any step loses its room.
+    //
+    // The one exception is a step carrying `pendingSafetyReview`, which is
+    // *supposed* to have no room. It is not drawable yet because nobody has
+    // approved what it would be drawing, and the assertion below is the other
+    // half of that contract: a pending step has to exist, be in its sequence
+    // position, and be critical. A step cannot be quietly deleted and a
+    // placeholder cannot be quietly presented.
     for (const code of MODULE_CODES) {
       const module = MODULES[code]!;
       expect(module.steps.length).toBe(6);
       for (const step of module.steps) {
         const room = objectsForStep(step, code, "en");
         const ids = room.map((o) => o.id);
+
+        if (step.pendingSafetyReview) {
+          expect(room).toEqual([]);
+          expect(step.critical).toBe(true);
+          expect(step.failure.blocksCertificate).toBe(true);
+          // And the candidates are named, so a reviewer can see what is waiting
+          // for them rather than finding an empty slot.
+          expect((step.choices ?? []).length).toBeGreaterThan(1);
+          continue;
+        }
+
         expect(room.length).toBeGreaterThan(0);
 
         if (step.kind === "observe") {
@@ -231,11 +249,19 @@ describe("content validation", () => {
     }
   });
 
-  test("each decide step has exactly one correct choice", () => {
+  test("each answerable decide step has exactly one correct choice", () => {
+    // And a step awaiting the safety reviewer has none, because naming a correct
+    // answer there would be inventing a safety procedure. The rule is the same
+    // rule: a decide step has one correct answer or it is not answerable yet.
     for (const code of MODULE_CODES) {
       for (const step of MODULES[code]!.steps) {
         if (step.kind !== "decide") continue;
-        expect((step.choices ?? []).filter((c) => c.correct)).toHaveLength(1);
+        const correct = (step.choices ?? []).filter((c) => c.correct);
+        if (step.pendingSafetyReview) {
+          expect(correct).toHaveLength(0);
+        } else {
+          expect(correct).toHaveLength(1);
+        }
       }
     }
   });
