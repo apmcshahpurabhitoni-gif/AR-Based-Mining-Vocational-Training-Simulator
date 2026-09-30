@@ -25,11 +25,13 @@ import {
   BufferGeometry,
   CylinderGeometry,
   Group,
+  IcosahedronGeometry,
   Mesh,
   MeshStandardMaterial,
   SphereGeometry,
   TorusGeometry,
 } from "three";
+import { ROOM, type SceneryKind } from "../environment";
 
 export type PropKind =
   | "sign"
@@ -178,4 +180,201 @@ export function buildProp(
   group.add(board);
   meshes.push(board);
   return { group, meshes, anchorY: 2.7 };
+}
+
+/**
+ * Build one piece of scenery.
+ *
+ * Scenery is context, never a target — see the header of `lib/environment.ts`
+ * for why that separation is what makes a rich room safe. Nothing here is
+ * returned as pickable, and the renderer must not make it so: an inert object
+ * that answers a tap is indistinguishable from a graded one, and grading an id
+ * no manifest knows about is the exact bug that put a fire hose reel in a gas
+ * module.
+ *
+ * These are deliberately a little undersized relative to the real plant. A room
+ * built to true scale reads as empty because the walls vanish and everything sits
+ * far apart; slightly small equipment on a wide floor reads as a working bay.
+ */
+export function buildScenery(kind: SceneryKind, keep: (g: BufferGeometry) => BufferGeometry): Group {
+  const group = new Group();
+
+  const mat = (color: string, opts: { rough?: number; metal?: number; emissive?: string } = {}) => {
+    const m = new MeshStandardMaterial({
+      color,
+      roughness: opts.rough ?? 0.8,
+      metalness: opts.metal ?? 0.1,
+    });
+    if (opts.emissive) m.emissive.set(opts.emissive);
+    return m;
+  };
+
+  const put = (
+    geo: BufferGeometry,
+    material: MeshStandardMaterial,
+    at: readonly [number, number, number],
+    rot?: readonly [number, number, number],
+  ) => {
+    const m = new Mesh(keep(geo), material);
+    m.position.set(at[0], at[1], at[2]);
+    if (rot) m.rotation.set(rot[0], rot[1], rot[2]);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    group.add(m);
+    return m;
+  };
+
+  if (kind === "conveyor") {
+    // The largest object in the room and the one that makes it read as a mine:
+    // a long yellow belt line on trestles.
+    const steel = mat("#6b7280", { rough: 0.5, metal: 0.5 });
+    const belt = mat("#c9a227", { rough: 0.85 });
+    const dark = mat("#2b3038", { rough: 0.9 });
+    put(new BoxGeometry(1.9, 0.32, 12), belt, [0, 1.16, 0]);
+    put(new BoxGeometry(2.05, 0.12, 12.2), dark, [0, 0.96, 0]);
+    for (let z = -5.5; z <= 5.5; z += 2.75) {
+      put(new BoxGeometry(1.5, 0.9, 0.22), steel, [0, 0.5, z]);
+    }
+    // Rollers, so the belt reads as machinery from a distance.
+    for (let z = -5; z <= 5; z += 1.25) {
+      put(new CylinderGeometry(0.16, 0.16, 2.0, 10), steel, [0, 1.34, z], [0, 0, Math.PI / 2]);
+    }
+    return group;
+  }
+
+  if (kind === "switchboard") {
+    // An electrical cabinet with the hazard striping every mine cabinet has.
+    const shell = mat("#5a6470", { rough: 0.55, metal: 0.45 });
+    const hazard = mat("#d9b310", { rough: 0.7 });
+    put(new BoxGeometry(0.72, 2.0, 0.42), shell, [0, 1.0, 0]);
+    put(new BoxGeometry(0.78, 0.22, 0.46), hazard, [0, 0.24, 0]);
+    put(new BoxGeometry(0.5, 0.3, 0.06), mat("#111418"), [0, 1.62, 0.24]);
+    for (let i = 0; i < 3; i++) {
+      put(
+        new CylinderGeometry(0.045, 0.045, 0.05, 8),
+        mat(i === 0 ? "#ef4444" : i === 1 ? "#facc15" : "#22c55e", { emissive: "#000000" }),
+        [-0.2 + i * 0.2, 1.02, 0.24],
+        [Math.PI / 2, 0, 0],
+      );
+    }
+    return group;
+  }
+
+  if (kind === "extractor") {
+    // Dust extractor: a duct running into a fan housing.
+    const duct = mat("#7b838f", { rough: 0.45, metal: 0.6 });
+    const body = mat("#4d5560", { rough: 0.6, metal: 0.3 });
+    put(new CylinderGeometry(0.42, 0.42, 1.1, 14), body, [0, 0, 0], [0, 0, Math.PI / 2]);
+    put(new CylinderGeometry(0.3, 0.3, 2.4, 12), duct, [0, 0, 0], [Math.PI / 2, 0, 0]);
+    put(new BoxGeometry(1.2, 1.0, 0.18), body, [0, 0, 0.55]);
+    return group;
+  }
+
+  if (kind === "hose-reel") {
+    // Red reel on a wall — the single most recognisable piece of fire kit.
+    const red = mat("#c0392b", { rough: 0.7 });
+    const hose = mat("#8e2f22", { rough: 0.95 });
+    put(new BoxGeometry(0.9, 0.7, 0.22), red, [0, 0, 0]);
+    put(new TorusGeometry(0.26, 0.1, 8, 18), hose, [0, 0, 0.2]);
+    put(new CylinderGeometry(0.08, 0.08, 0.4, 10), red, [0, 0, 0.24], [Math.PI / 2, 0, 0]);
+    return group;
+  }
+
+  if (kind === "first-aid") {
+    // White box, green cross.
+    const box = mat("#e5e7eb", { rough: 0.75 });
+    const green = mat("#16a34a", { rough: 0.7 });
+    put(new BoxGeometry(0.62, 0.5, 0.22), box, [0, 0, 0]);
+    put(new BoxGeometry(0.34, 0.1, 0.03), green, [0, 0, 0.12]);
+    put(new BoxGeometry(0.1, 0.34, 0.03), green, [0, 0, 0.12]);
+    return group;
+  }
+
+  if (kind === "gas-monitor") {
+    // Small wall unit with a lit display. The one piece of kit that is bright in
+    // a dark bay, which is how a real one catches the eye.
+    const shell = mat("#3f4650", { rough: 0.6 });
+    put(new BoxGeometry(0.34, 0.44, 0.18), shell, [0, 0, 0]);
+    put(
+      new BoxGeometry(0.24, 0.14, 0.03),
+      new MeshStandardMaterial({ color: "#22c55e", emissive: "#0f3d22", roughness: 0.4 }),
+      [0, 0.06, 0.1],
+    );
+    return group;
+  }
+
+  if (kind === "phone") {
+    // Emergency communication handset.
+    put(new BoxGeometry(0.3, 0.5, 0.16), mat("#b45309", { rough: 0.75 }), [0, 0, 0]);
+    put(new BoxGeometry(0.24, 0.44, 0.06), mat("#1f2937"), [0, 0, 0.1]);
+    return group;
+  }
+
+  if (kind === "estop") {
+    // Red mushroom button on a yellow post. Meant to be findable at a glance.
+    const post = mat("#d9b310", { rough: 0.8 });
+    put(new BoxGeometry(0.16, 1.4, 0.16), post, [0, 0.7, 0]);
+    put(
+      new CylinderGeometry(0.14, 0.14, 0.1, 12),
+      new MeshStandardMaterial({ color: "#dc2626", emissive: "#3b0a0a", roughness: 0.6 }),
+      [0, 1.1, 0.12],
+      [Math.PI / 2, 0, 0],
+    );
+    return group;
+  }
+
+  if (kind === "bench") {
+    // Work table with a scatter of parts on top.
+    const wood = mat("#6b5136", { rough: 0.95 });
+    const steel = mat("#4b5563", { rough: 0.5, metal: 0.5 });
+    put(new BoxGeometry(2.2, 0.1, 0.9), wood, [0, 0.88, 0]);
+    for (const dx of [-0.95, 0.95]) {
+      for (const dz of [-0.34, 0.34]) {
+        put(new BoxGeometry(0.1, 0.86, 0.1), steel, [dx, 0.43, dz]);
+      }
+    }
+    put(new BoxGeometry(0.4, 0.16, 0.3), steel, [-0.5, 1.0, 0.1]);
+    put(new BoxGeometry(0.28, 0.22, 0.28), mat("#a16207"), [0.6, 1.03, -0.1]);
+    return group;
+  }
+
+  if (kind === "toolboard") {
+    // Pegboard with a few hanging tools.
+    put(new BoxGeometry(1.5, 1.1, 0.08), mat("#4b3f2f", { rough: 1 }), [0, 0, 0]);
+    for (const [x, h] of [
+      [-0.5, 0.42],
+      [-0.15, 0.3],
+      [0.2, 0.5],
+      [0.55, 0.34],
+    ] as const) {
+      put(new BoxGeometry(0.06, h, 0.06), mat("#9ca3af", { metal: 0.6, rough: 0.4 }), [x, -0.1 - h / 2, 0.1]);
+    }
+    return group;
+  }
+
+  if (kind === "crate") {
+    const wood = mat("#6b5333", { rough: 1 });
+    put(new BoxGeometry(1.1, 0.8, 0.9), wood, [0, 0.4, 0]);
+    put(new BoxGeometry(1.16, 0.08, 0.96), mat("#4a3823"), [0, 0.62, 0]);
+    return group;
+  }
+
+  if (kind === "rock") {
+    // Broken rock. Deterministic irregular scaling — three.js has no noise
+    // displacement here, and a scaled icosahedron faceted by flat shading reads
+    // as rock at the distances that matter without a geometry pass per boulder.
+    const stone = mat("#5b5348", { rough: 1 });
+    put(new IcosahedronGeometry(0.85, 0), stone, [0, 0.34, 0], [0.4, 0.9, 0.2]).scale.set(1.5, 0.75, 1.2);
+    put(new IcosahedronGeometry(0.5, 0), mat("#4c453c", { rough: 1 }), [0.9, 0.2, 0.5], [0.9, 0.2, 0.6]).scale.set(1.1, 0.8, 1.0);
+    return group;
+  }
+
+  // pipe-run — the service line across the roof.
+  put(
+    new CylinderGeometry(0.14, 0.14, ROOM.width - 1.2, 10),
+    mat("#7d6a4a", { rough: 0.6, metal: 0.3 }),
+    [0, 0, 0],
+    [0, 0, Math.PI / 2],
+  );
+  return group;
 }
