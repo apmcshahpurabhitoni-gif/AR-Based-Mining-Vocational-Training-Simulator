@@ -18,6 +18,8 @@ import {
   requireModule,
 } from "./modules";
 import { validateAllModules, validateManifest, formatIssues } from "./validate-content";
+import { MARKERS, INTERACTABLES, distractorsFor, isInteractable } from "./markers";
+import { objectsForStep } from "./room";
 import { scoreModule, scoreOverall } from "./scoring";
 import { evaluateGate, evaluateRecheck, sampleRecheckSteps } from "./gate";
 import type { AttemptEvent, StepAttemptRecord } from "./types";
@@ -28,6 +30,148 @@ describe("content validation", () => {
     const issues = validateAllModules();
     expect(formatIssues(issues)).toBe("");
     expect(issues).toEqual([]);
+  });
+
+  test("an observe target from another module is rejected", () => {
+    // Regression guard. The training room used to be furnished from a list
+    // that lived only in the page, so a gas module could put a fire hose reel
+    // in front of a trainee and grade a real gas consequence against it.
+    const gas = requireModule("GAS");
+    const step = gas.steps.find((s) => s.id === "B-01")!;
+    const polluted = {
+      ...gas,
+      steps: gas.steps.map((s) =>
+        s.id === step.id
+          ? { ...s, targets: [{ ...s.targets![0]!, id: "fire-hose-reel", position: { x: 0.5, y: 0.5 } }] }
+          : s,
+      ),
+    };
+    const issues = validateManifest(polluted);
+    expect(issues.some((i) => i.message.includes("fire-hose-reel"))).toBe(true);
+  });
+
+  test("every module has a marker vocabulary and no marker is shared", () => {
+    const seen = new Map<string, string>();
+    for (const code of MODULE_CODES) {
+      const pool = MARKERS[code] ?? [];
+      expect(pool.length).toBeGreaterThan(0);
+      for (const marker of pool) {
+        expect(seen.has(marker)).toBe(false);
+        seen.set(marker, code);
+      }
+    }
+    // Every observe target must be drawable from its own module's vocabulary.
+    for (const code of MODULE_CODES) {
+      const pool = new Set(MARKERS[code] ?? []);
+      for (const step of MODULES[code]!.steps) {
+        for (const target of step.targets ?? []) {
+          expect(pool.has(target.id)).toBe(true);
+        }
+      }
+    }
+  });
+
+  test("distractors are same-module and never the answer", () => {
+    for (const code of MODULE_CODES) {
+      for (const step of MODULES[code]!.steps) {
+        const used = (step.targets ?? []).map((t) => t.id);
+        if (used.length === 0) continue;
+        const pool = new Set(MARKERS[code] ?? []);
+        const picks = distractorsFor(code, used);
+        expect(picks.length).toBeGreaterThan(0);
+        for (const id of picks) {
+          expect(used).not.toContain(id);
+          expect(pool.has(id)).toBe(true);
+        }
+      }
+    }
+  });
+
+  test("every module has an interactable vocabulary and no interactable is shared", () => {
+    const seen = new Map<string, string>();
+    for (const code of MODULE_CODES) {
+      const pool = INTERACTABLES[code] ?? [];
+      expect(pool.length).toBeGreaterThan(0);
+      for (const id of pool) {
+        expect(seen.has(id)).toBe(false);
+        seen.set(id, code);
+      }
+    }
+    // Every option a step can be answered with must be drawable, or the 3D
+    // training environment cannot present that step at all.
+    for (const code of MODULE_CODES) {
+      for (const step of MODULES[code]!.steps) {
+        for (const choice of step.choices ?? []) {
+          expect(isInteractable(code, choice.id)).toBe(true);
+        }
+        for (const element of step.action?.elements ?? []) {
+          expect(isInteractable(code, element)).toBe(true);
+        }
+      }
+    }
+  });
+
+  test("a choice outside the interactable vocabulary is rejected", () => {
+    // Same class of defect as the fire-hose-reel target, one surface over: an
+    // option the manifest invented cannot be drawn, and a decide step whose
+    // answer is not drawable is a step the 3D environment cannot deliver.
+    const fire = requireModule("FIRE");
+    const step = fire.steps.find((s) => s.id === "A-03")!;
+    const polluted = {
+      ...fire,
+      steps: fire.steps.map((s) =>
+        s.id === step.id
+          ? { ...s, choices: [{ ...s.choices![0]!, id: "extinguisher-magic" }] }
+          : s,
+      ),
+    };
+    const issues = validateManifest(polluted);
+    expect(issues.some((i) => i.message.includes("extinguisher-magic"))).toBe(true);
+  });
+
+  test("all six steps of both modules are drawable in the 3D training environment", () => {
+    // docs/12: "Every target/action must be representable in the 3D training
+    // environment." docs/13: "All six steps use semantic actions compatible
+    // with the 3D training environment." This is the acceptance evidence for
+    // both — it fails if any step loses its room.
+    for (const code of MODULE_CODES) {
+      const module = MODULES[code]!;
+      expect(module.steps.length).toBe(6);
+      for (const step of module.steps) {
+        const room = objectsForStep(step, code, "en");
+        const ids = room.map((o) => o.id);
+        expect(room.length).toBeGreaterThan(0);
+
+        if (step.kind === "observe") {
+          // The target the step asks for is in the room, at its authored spot.
+          for (const target of step.targets ?? []) {
+            const obj = room.find((o) => o.id === target.id);
+            expect(obj).toBeDefined();
+            expect(obj!.authored).toBe(true);
+          }
+        } else if (step.kind === "decide") {
+          // Every option is on the arc, and all of them are selectable — none
+          // is demoted to scenery, which would grade a real option as a miss.
+          expect(ids.sort()).toEqual((step.choices ?? []).map((c) => c.id).sort());
+          for (const obj of room) expect(obj.role).toBe("interactable");
+        } else {
+          // The whole sequence, in order, numbered from one.
+          expect(ids).toEqual(step.action?.elements ?? []);
+          expect(room.map((o) => o.order)).toEqual(room.map((_, i) => i + 1));
+        }
+      }
+    }
+  });
+
+  test("an act room shows progress without changing what is answerable", () => {
+    const step = MODULES.FIRE!.steps.find((s) => s.id === "A-04")!;
+    const fresh = objectsForStep(step, "FIRE", "en", 0);
+    const partly = objectsForStep(step, "FIRE", "en", 2);
+    // Same objects, same ids — only the done flags move. Tapping a completed
+    // element is still a real out-of-order miss, which is the point of A-05.
+    expect(partly.map((o) => o.id)).toEqual(fresh.map((o) => o.id));
+    expect(fresh.every((o) => o.done === false)).toBe(true);
+    expect(partly.filter((o) => o.done).map((o) => o.id)).toEqual(["pull-pin", "aim-base"]);
   });
 
   test("every module is registered and retrievable", () => {

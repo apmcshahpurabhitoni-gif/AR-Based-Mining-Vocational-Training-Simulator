@@ -12,7 +12,9 @@
     "validate:content": "bun run scripts/validate-content.ts",
     "verify": "bun run validate:content && bun test && bun tsc -b --noEmit",
     "convex:dev": "convex dev --once",
-    "convex:selftest": "convex run selftest:runSelfTest {\"suffix\":\"local\"}"
+    "convex:selftest": "convex run selftest:runSelfTest {\"suffix\":\"local\"}",
+    "make:icons": "bun run scripts/make-icons.ts",
+    "make:targets": "bun run scripts/make-targets.ts"
   },
   "dependencies": {
     "clsx": "^2.1.1",
@@ -24,9 +26,14 @@
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-router-dom": "^7.18.4",
+    "mind-ar": "1.2.5",
     "three": "^0.186.1"
   },
+  "overrides": {
+    "canvas": "file:./scripts/canvas-stub"
+  },
   "devDependencies": {
+    "@napi-rs/canvas": "^1.0.9",
     "@tailwindcss/vite": "^4.3.3",
     "@types/bun": "^1.4.2",
     "@types/node": "^26.6.3",

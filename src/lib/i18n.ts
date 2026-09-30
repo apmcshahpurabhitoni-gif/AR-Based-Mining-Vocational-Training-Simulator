@@ -113,6 +113,7 @@ export type UiKey =
   | "training.hintsLeft"
   | "training.noHints"
   | "training.step"
+  | "training.modeMarker"
   | "training.modeReticle"
   | "training.modeGuided"
   | "training.cameraUnavailable"
@@ -296,6 +297,7 @@ export const UI: Strings = {
   "training.hintsLeft": { en: "hints left", hi: "संकेत बचे" },
   "training.noHints": { en: "No hints left", hi: "कोई संकेत नहीं बचा" },
   "training.step": { en: "Step", hi: "चरण" },
+  "training.modeMarker": { en: "Marker (AR)", hi: "मार्कर (AR)" },
   "training.modeReticle": { en: "Reticle (camera)", hi: "रिटाइकल (कैमरा)" },
   "training.modeGuided": { en: "Guided", hi: "निर्देशित" },
   "training.cameraUnavailable": {

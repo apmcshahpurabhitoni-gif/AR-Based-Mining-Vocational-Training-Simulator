@@ -7,7 +7,7 @@
  */
 
 import { useState } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { clsx } from "clsx";
 import {
   Activity,
@@ -31,8 +31,13 @@ export function AppShell() {
   const navigate = useNavigate();
   const queue = useSyncQueue(token);
   const [menuOpen, setMenuOpen] = useState(false);
+  const { pathname } = useLocation();
 
   const isSupervisor = profile?.role === "admin" || profile?.role === "supervisor";
+
+  /** Routes that render a 3D surface rather than a document. */
+  const isTrainingSurface =
+    pathname.startsWith("/training") || pathname.startsWith("/recheck");
 
   const navItems = [
     { to: "/dashboard", label: t("nav.dashboard"), icon: LayoutGrid, show: true },
@@ -135,7 +140,19 @@ export function AppShell() {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6 sm:py-10">
+      {/*
+       * The training surfaces get a much wider container than the rest of the
+       * app. A 1152 px reading measure is right for text and wrong for a room you
+       * are meant to look around inside: capped at that width the 3D view renders
+       * as a letterbox with the equipment squeezed into the middle of it. The
+       * other pages keep the narrow measure, because they are documents.
+       */}
+      <main
+        className={clsx(
+          "mx-auto w-full flex-1 px-4 py-8 sm:px-6 sm:py-10",
+          isTrainingSurface ? "max-w-[110rem]" : "max-w-6xl",
+        )}
+      >
         <Outlet />
       </main>
 
