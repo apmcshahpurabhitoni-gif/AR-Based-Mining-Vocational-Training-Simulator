@@ -38,8 +38,11 @@ printed materials** — the demo runs on L2 reticle, which needs nothing prepare
        to deliver and installed nothing on your phone."
 
 0:10  They walk. Camera shows the real room. The exit sign lights up.
-      [NO AUDIO — the build has no narration yet. Read the Hindi instruction
-       aloud yourself as they read it. See §1.2.]
+      Instruction is read aloud in Hindi by the phone's own speech engine.
+      [Narration is ON by default and reads the same Hindi string that is on
+       screen, so it cannot disagree with it. **Rehearse this on the demo
+       phone**: a device with no Hindi voice installed reads nothing, and the
+       app says so on screen. See §1.2.]
       They tap the exit. Step passes.
 
 0:25  Step A-03. "सही बुझावा चुनो" — pick the right extinguisher.
@@ -112,7 +115,7 @@ failed are the reason this section exists.
 | Wrong answer refused on the spot, critical miss recorded, retry forced | **Yes** | Runner-side, entirely local. Works in airplane mode. |
 | Hindi / English text throughout | **Yes** | |
 | A-01 "no markers, no setup" | **Yes** | L2 needs no printed material. |
-| Instruction arrives in **AUDIO** | **No** | `narrationKey` exists in the manifest and **nothing consumes it**: no `speechSynthesis`, no `<audio>`, no audio files. Read instructions aloud yourself. |
+| Instruction is read aloud in **Hindi** | **Yes, on most handsets** | `speechSynthesis` at `hi-IN`, on step entry, mute toggle in the header, and the app says so on screen when no Hindi voice is installed. **Not a guarantee**: voice packs vary, and some devices will not speak until the page has been touched — the app then shows a tap-to-enable prompt. Rehearse on the demo phone. |
 | Certificate panel flips to **LOCKED** live during training | **No** | No live certificate panel exists. The only local scoring is a session-history number; the gate verdict is server-side. |
 | **COLD RE-CHECK** beat | **Needs a server** | Sampling and scoring run in Convex. The sampler also prioritises critical steps, so it would offer the pending B-04. |
 | **Result screen / certificate issued / QR** | **Needs a server** *and* is impossible anyway | The gate is server-computed, and it cannot pass while a required module is unapproved. |
@@ -245,7 +248,8 @@ half-translates and hides it has told the judge the safety review was skipped.
 > over SMS; we're applying it to industrial safety where the consequence of getting it wrong is a
 > fatality."
 >
-> *Do not add audio to this answer — there is no audio narration in this build. See §1.2.*
+> *Narration reads the instruction aloud in Hindi, from the phone itself, with no network and nothing
+> downloaded. If a device has no Hindi voice it says so rather than reading in the wrong language.*
 
 **"What's your business model?"**
 > "Licence-free software. That's the point — the reason VR never reached a small operator is that
@@ -279,7 +283,8 @@ half-translates and hides it has told the judge the safety review was skipped.
 | **No network** | Already the plan. Lead with it: *"This is airplane mode."* |
 | **Desktop / no phone** | L3 runs in a browser. Steps still work, tapped on screen. |
 | **Hindi font renders wrong** | Self-hosted, should not happen. If it does, switch to English and say so plainly. |
-| **Audio asked for** | There is no audio narration in this build. Say so plainly and read the instruction aloud: *"is build mein awaaz nahi hai abhi — main padh ke sunata hoon."* Do not claim it exists. |
+| **Audio asked for** | Narration is on by default and reads the Hindi instruction aloud. If the demo phone has no Hindi voice, the app says so on screen — say that plainly: *"is phone par hindi awaaz nahi hai, isliye main padh ke sunata hoon."* Do not claim audio that did not happen. |
+| **Audio silent on the demo phone** | Mute toggle is in the training header. If the device refuses to speak until touched, the on-screen prompt is a button — tap it. If there is genuinely no Hindi voice, say so and read the instruction aloud yourself. |
 | **Asked for the cold re-check / certificate** | Needs the server, and the certificate cannot issue while a required module is unapproved. Demo the refusal (§1.2) — it is the stronger answer. |
 | **App crashes** | Have a 30-second screen recording as the fallback. Do not debug live. |
 | **Judge's phone is ancient** | L3 handles it. This is why the ladder exists. |
@@ -297,6 +302,9 @@ half-translates and hides it has told the judge the safety review was skipped.
 - [ ] Second phone on the verify page, scanner working *(unused until step 4 is approved)*
 - [ ] Dashboard seeded and showing the heatmap
 - [ ] Language preset to Hindi
+- [ ] **Narration tested on this phone** — Hindi voice present, reads on step entry, and the mute
+      toggle in the training header works. This is the one line here that is a feature rather than a
+      safety check, and it is the one most likely to differ per handset.
 - [ ] Console clean
 - [ ] Screen recording fallback ready
 - [ ] **Santali answer rehearsed** — don't be asked cold *"where's Santali?"*

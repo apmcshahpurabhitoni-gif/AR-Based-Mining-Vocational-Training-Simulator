@@ -35,6 +35,8 @@ import {
   Lightbulb,
   RotateCcw,
   TriangleAlert,
+  Volume2,
+  VolumeX,
   X,
 } from "lucide-react";
 import type { RoomObject } from "../lib/room";
@@ -42,6 +44,14 @@ import { objectsForStep } from "../lib/room";
 import { SHIPPED_MODES, type ShippedARMode } from "../lib/ar";
 import { hasARTarget } from "../lib/ar/targets";
 import { distractorsFor, markerLabel } from "../lib/markers";
+import { useNarration } from "../lib/use-narration";
+
+/**
+ * Step id used when there is no step to narrate — a finished run, or a state the
+ * training page guards against. Passed to the hook rather than skipping it, so
+ * the hook count does not depend on which branch renders.
+ */
+const NO_STEP = "—";
 
 // Lazy so three.js is fetched only when a room is actually opened. The landing
 // page, the dashboard and the re-check never pay for it.
@@ -252,6 +262,30 @@ export function Training({ manifest: manifestProp, phase = "training", sample, o
     [manifest],
   );
 
+  /*
+   * Narration.
+   *
+   * Read on step entry, in the trainee's language, from the same instruction
+   * string that is on screen — so the two can never disagree, which is the only
+   * way to make "they don't read, they listen" a true statement about this
+   * build rather than about a version of it that does not exist.
+   *
+   * Called before the `!step` early return below, because a hook called after a
+   * conditional return is a hook called a different number of times depending
+   * on state, and React notices. With no step there is nothing to read, so the
+   * hook is handed a sentinel and switched off.
+   *
+   * Off on the re-check. A cold re-check is a memory test: reading the
+   * instruction aloud tells the trainee what to do, which is the thing being
+   * tested, so that surface is deliberately silent.
+   */
+  const narration = useNarration(
+    step?.id ?? NO_STEP,
+    step?.instruction,
+    locale,
+    phase !== "recheck" && Boolean(step),
+  );
+
   // -- Rendering ----------------------------------------------------------
   if (!step) {
     return (
@@ -352,6 +386,28 @@ export function Training({ manifest: manifestProp, phase = "training", sample, o
             {walk3d ? "2d scene" : "3d room"}
           </button>
         )}
+
+        {/* Narration toggle. Present even when it cannot work, because a control
+            that vanishes leaves no way to tell "off" from "unavailable" — and a
+            device that cannot speak needs saying so, not hiding. */}
+        <button
+          type="button"
+          onClick={() => narration.setMuted(!narration.muted)}
+          aria-pressed={!narration.muted}
+          aria-label={t("training.narration.toggle")}
+          title={narration.muted ? t("training.narration.off") : t("training.narration.on")}
+          className={clsx(
+            "flex items-center gap-1.5 rounded border px-3 py-1.5 font-mono text-[11px] uppercase tracking-widest transition-colors",
+            narration.muted
+              ? "border-ink-700 text-fog-600 hover:text-fog-400"
+              : "border-amber-500/40 text-amber-300 hover:border-amber-500",
+          )}
+        >
+          {narration.muted ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
+          <span className="hidden sm:inline">
+            {narration.muted ? t("training.narration.off") : t("training.narration.on")}
+          </span>
+        </button>
 
         <ModeSwitch
           mode={state.arMode}
@@ -480,6 +536,45 @@ export function Training({ manifest: manifestProp, phase = "training", sample, o
           <p className="text-lg font-medium leading-snug text-fog-50">
             {localise(step.instruction, locale)}
           </p>
+          {/*
+            The narration notice.
+
+            Shown whenever the instruction was not read aloud and the trainee has
+            not turned it off. A device that silently produced no audio would
+            leave a trainee who cannot read the text sitting on a step nobody
+            told them about — so the app says which of the four things happened,
+            in the trainee's own language, next to the text it is a substitute
+            for. That includes the one that is fixable in a tap: a browser that
+            will not speak until the page has been touched.
+            */}
+          {narration.outcome &&
+            narration.outcome !== "spoken" &&
+            !narration.muted &&
+            narration.outcome !== "empty" && (
+              <p
+                role="status"
+                className="mt-3 flex items-start gap-2 rounded border border-ink-700 bg-ink-900/60 px-3 py-2 text-sm text-fog-400"
+              >
+                <VolumeX className="mt-0.5 h-4 w-4 shrink-0 text-fog-600" />
+                <span>
+                  {narration.outcome === "no-voice"
+                    ? t("training.narration.noVoice")
+                    : narration.outcome === "blocked"
+                      ? // A tap is the gesture the browser was waiting for, so the
+                        // button is the fix rather than an instruction to find one.
+                        (
+                          <button
+                            type="button"
+                            onClick={narration.retry}
+                            className="text-left text-amber-300 underline underline-offset-4 hover:text-amber-200"
+                          >
+                            {t("training.narration.blocked")}
+                          </button>
+                        )
+                      : t("training.narration.unsupported")}
+                </span>
+              </p>
+            )}
           <p className="mt-1.5 font-mono text-[11px] uppercase tracking-wider text-fog-800">
             {step.kind === "observe"
               ? t("training.tapTarget")

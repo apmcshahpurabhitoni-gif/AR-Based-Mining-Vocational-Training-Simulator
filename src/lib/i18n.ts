@@ -124,6 +124,12 @@ export type UiKey =
   | "training.tapInOrder"
   | "training.chooseOne"
   | "training.pendingReview.title"
+  | "training.narration.on"
+  | "training.narration.off"
+  | "training.narration.toggle"
+  | "training.narration.noVoice"
+  | "training.narration.unsupported"
+  | "training.narration.blocked"
   | "training.pendingReview.body"
   | "training.pendingReview.hold"
   | "training.queueSaved"
@@ -332,6 +338,30 @@ export const UI: Strings = {
   "training.tapTarget": { en: "Tap what the instruction asks for", hi: "जो निर्देश कहे उसे टैप करो" },
   "training.tapInOrder": { en: "Tap these in order", hi: "इन्हें क्रम में टैप करो" },
   "training.chooseOne": { en: "Choose one", hi: "एक चुनो" },
+  /**
+   * Narration.
+   *
+   * The failure strings are not decoration. A trainee in a mine who cannot read
+   * Hindi relies on the audio, and a device that silently produced none would
+   * leave them listening to a step they were never told. So the control says
+   * what happened, in the trainee's language, whenever the answer was not
+   * "spoken".
+   */
+  "training.narration.on": { en: "Read instructions aloud", hi: "निर्देश जोर से पढ़ें" },
+  "training.narration.off": { en: "Narration off", hi: "निर्देश नहीं पढ़े जाएंगे" },
+  "training.narration.toggle": { en: "Toggle spoken instructions", hi: "बोले जाने वाले निर्देश" },
+  "training.narration.noVoice": {
+    en: "This device has no Hindi voice installed, so instructions are not being read aloud. The text below is the instruction.",
+    hi: "इस डिवाइस पर हिंदी आवाज़ नहीं है, इसलिए निर्देश जोर से नहीं पढ़े जा रहे। नीचे लिखा पाठ ही निर्देश है।",
+  },
+  "training.narration.unsupported": {
+    en: "This browser cannot read instructions aloud. The text below is the instruction.",
+    hi: "यह ब्राउज़र निर्देश जोर से नहीं पढ़ सकता। नीचे लिखा पाठ ही निर्देश है।",
+  },
+  "training.narration.blocked": {
+    en: "Tap anywhere to let the phone read instructions aloud.",
+    hi: "निर्देश जोर से पढ़ने के लिए कहीं भी एक बार दबाएँ।",
+  },
   "training.pendingReview.title": {
     en: "Awaiting qualified safety review",
     hi: "योग्य सुरक्षा समीक्षा लंबित",
