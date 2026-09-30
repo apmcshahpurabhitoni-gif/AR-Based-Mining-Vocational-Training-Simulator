@@ -14,7 +14,8 @@
     "convex:dev": "convex dev --once",
     "convex:selftest": "convex run selftest:runSelfTest {\"suffix\":\"local\"}",
     "make:icons": "bun run scripts/make-icons.ts",
-    "make:targets": "bun run scripts/make-targets.ts"
+    "make:targets": "bun run scripts/make-targets.ts",
+    "make:packet": "bun run scripts/make-review-packet.ts"
   },
   "dependencies": {
     "clsx": "^2.1.1",

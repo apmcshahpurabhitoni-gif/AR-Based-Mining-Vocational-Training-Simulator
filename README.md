@@ -39,8 +39,21 @@ bun convex:selftest  # 9 checks against the live database
 | [06 — Content Spec](docs/06-content-spec.md) | **Full step data for both modules**, content sources, missing-domain strategy, i18n |
 | [07 — Architecture](docs/07-architecture.md) | Stack, repo layout, routing, offline architecture, deployment, CI gates |
 | [08 — Demo Script](docs/08-demo-script.md) | The 120-second run, pitch, judge Q&A bank, failure contingency |
+| [12 / 13 — Module Specs](docs/12-FIRE-MODULE-SPEC.md) | The frozen FIRE and GAS contracts, including the **release-blocking safety review** |
+| [**R9 — Safety Review Packet**](docs/R9-SAFETY-REVIEW-PACKET.md) | **What the safety reviewer is being asked to sign off**, generated from the manifests |
 
 Read **01** first — it constrains everything else.
+
+The R9 packet is the one document a qualified mining safety reviewer needs, and it
+is generated from the shipped manifests so it cannot describe content that is no
+longer there:
+
+```
+bun run make:packet      # regenerate after any content change
+```
+
+A test compares the committed file against a fresh render, so editing a manifest
+without regenerating fails the build.
 
 ---
 

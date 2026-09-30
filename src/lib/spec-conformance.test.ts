@@ -21,114 +21,14 @@
 import { describe, expect, test } from "bun:test";
 import { MODULES, MODULE_CODES } from "./modules";
 import { objectsForStep } from "./room";
-import type { StepKind } from "./types";
-
-/** One row of a spec's six-step table. */
-interface SpecStep {
-  /** The id the spec uses. GAS's are `G-0n`; the manifest's are `B-0n`. */
-  specId: string;
-  kind: StepKind;
-  critical: boolean;
-  /** What the spec says the trainee should demonstrate. */
-  behaviour: string;
-}
-
-/** docs/12 §"Six-step structure", verbatim. */
-const FIRE_SPEC: readonly SpecStep[] = [
-  { specId: "A-01", kind: "observe", critical: false, behaviour: "Identify nearest exit" },
-  { specId: "A-02", kind: "observe", critical: false, behaviour: "Raise the fire alarm" },
-  {
-    specId: "A-03",
-    kind: "decide",
-    critical: true,
-    behaviour: "Select the appropriate extinguisher for the defined fire scenario",
-  },
-  { specId: "A-04", kind: "act", critical: false, behaviour: "Execute the approved PASS sequence" },
-  {
-    specId: "A-05",
-    kind: "act",
-    critical: true,
-    behaviour: "Follow the scenario-specific safe withdrawal procedure",
-  },
-  {
-    specId: "A-06",
-    kind: "decide",
-    critical: false,
-    behaviour: "Proceed to the designated assembly point and follow reporting instructions",
-  },
-];
-
-/** docs/13 §"Six-step structure", verbatim. */
-const GAS_SPEC: readonly SpecStep[] = [
-  {
-    specId: "G-01",
-    kind: "observe",
-    critical: false,
-    behaviour: "Recognize the gas/confined-space warning condition",
-  },
-  { specId: "G-02", kind: "decide", critical: true, behaviour: "Select the safe immediate response" },
-  { specId: "G-03", kind: "act", critical: true, behaviour: "Raise warning/communicate the emergency" },
-  {
-    specId: "G-04",
-    kind: "act",
-    critical: true,
-    behaviour: "Withdraw or remain outside the defined hazardous area as instructed",
-  },
-  {
-    specId: "G-05",
-    kind: "decide",
-    critical: true,
-    behaviour: "Select the approved isolation/response action",
-  },
-  {
-    specId: "G-06",
-    kind: "decide",
-    critical: false,
-    behaviour: "Report/assemble according to the emergency procedure",
-  },
-];
-
-/** The spec table, keyed by module code, with the manifest id each row maps to. */
-const SPECS: Readonly<Record<string, { rows: readonly SpecStep[]; manifestIds: readonly string[] }>> =
-  {
-    FIRE: { rows: FIRE_SPEC, manifestIds: ["A-01", "A-02", "A-03", "A-04", "A-05", "A-06"] },
-    GAS: { rows: GAS_SPEC, manifestIds: ["B-01", "B-02", "B-03", "B-04", "B-05", "B-06"] },
-  };
+import { DECLARED_DEVIATIONS, GAS_SPEC, SPECS, type SpecStep } from "./spec-tables";
 
 /**
- * Differences that are real, known, and not yet resolved.
- *
- * Each key is `<module>/<step>.<field>`. A difference not listed here fails the
- * test below. Deleting an entry is how a deviation gets resolved — and for
- * `GAS/B-04.kind` it is a one-word change to `decide` if the reviewer agrees
- * that a choice between two outcomes is not a sequence.
+ * Both step tables live in `src/lib/spec-tables.ts`, not in this file, because
+ * two more consumers need the same transcription: the review-packet generator
+ * prints the requirement beside the shipped content, and a human auditing the
+ * simulator reads it. One copy means a correction lands in one place.
  */
-const DECLARED_DEVIATIONS: Readonly<Record<string, string>> = {
-  "GAS/B-04.kind":
-    "docs/13 labels step 4 `act`, but what it describes — 'withdraw OR remain " +
-    "outside, as instructed' — is a choice between two outcomes, not an ordered " +
-    "sequence. Shipping it as an `act` would assert a withdrawal order that no " +
-    "approved procedure states. It is modelled as `decide` with three " +
-    "candidates until the reviewer supplies the procedure. This is the " +
-    "reviewer's call to overturn.",
-  "GAS/B-03.kind":
-    "docs/13 step 3 is `act` (raise warning / communicate the emergency). The " +
-    "shipped step is a `decide` on buddy arrangement, which is closer to " +
-    "docs/13 step 2's 'select the safe immediate response' than to step 3. A " +
-    "raise-the-warning action is therefore not taught anywhere in GAS. " +
-    "Requires approved content, so it is declared rather than invented.",
-  "GAS/B-05.kind":
-    "docs/13 step 5 is `decide` (select the approved isolation/response " +
-    "action); the shipped step is an `act` performing the valve isolation " +
-    "sequence. Same behaviour, different mechanism. Declare or correct on " +
-    "review.",
-  "GAS/B-0n.ids":
-    "The manifest numbers GAS steps B-01..B-06; docs/13 numbers them " +
-    "G-01..G-06. The ids are load-bearing — they key stored attempt records " +
-    "and the re-check sampler — so renaming them is a data migration, not a " +
-    "cosmetic change, and it must not happen before the reviewer signs off the " +
-    "content those steps carry.",
-};
 
 /** Fields this file compares. `id` is compared through the id map above. */
 type Field = "kind" | "critical";
