@@ -1,0 +1,125 @@
+# Builds the KAVACH Android APK.
+#
+# The app itself is a web app; this is the wrapper that turns it into something a
+# trainee can be handed as a file. The whole build is here rather than on a
+# laptop because the native toolchain is the part that is painful to reproduce:
+# a JDK, the Android SDK, and a Gradle version that has to agree with the Android
+# Gradle Plugin. See docs/17.
+#
+# What it produces is a **debug-signed** APK, which is the right artefact for a
+# pilot: Android signs debug builds with a generated keystore, so it installs by
+# sideload with no secrets, no store account and no signing key to lose. A
+# release build needs a keystore of our own and is a separate, deliberate step.
+
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # One APK build at a time. Two of these race on the same Gradle cache and the
+  # loser fails for reasons that have nothing to do with the app.
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    name: assemble debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # The backend URL is baked into the bundle at build time, not fetched at
+      # runtime, so an APK built without it points at its own local origin and
+      # cannot reach the assessment backend. It is a repository secret because it
+      # is deployment configuration, not source.
+      #
+      # The build does NOT fail when it is absent: the app runs, the room works,
+      # and the offline paths work — a backend-dependent step simply reports the
+      # backend as unreachable, which is the behaviour the app already has. A red
+      # build for a missing secret would be a worse first experience than a
+      # warning on a working artefact.
+      - name: Resolve the backend URL
+        id: backend
+        env:
+          CONVEX_URL: ${{ secrets.VITE_CONVEX_URL }}
+        run: |
+          if [ -n "$CONVEX_URL" ]; then
+            echo "url=$CONVEX_URL" >> "$GITHUB_OUTPUT"
+            echo "configured" >> "$GITHUB_OUTPUT"
+          else
+            echo "url=" >> "$GITHUB_OUTPUT"
+            echo "missing" >> "$GITHUB_OUTPUT"
+            echo "::warning title=APK has no backend URL::VITE_CONVEX_URL is not set, so this APK cannot reach the assessment backend. Everything offline still works. Set the repository secret and re-run before a pilot."
+          fi
+
+      - name: Build the web app
+        env:
+          VITE_CONVEX_URL: ${{ steps.backend.outputs.url }}
+        run: bun run build
+
+      # `cap sync` copies dist/ into the native project and updates the plugin
+      # list. It is the step that makes the APK and the deployed site the same
+      # build, rather than two builds that were meant to match.
+      - name: Sync into the Android project
+        run: bunx cap sync android
+
+      - uses: actions/setup-java@v4
+        with:
+          # Capacitor 8 targets Java 21, and Android Gradle Plugin 8.13 wants 17
+          # or newer. 21 is what Capacitor's own toolchain tests against.
+          distribution: temurin
+          java-version: '21'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Accept the Android SDK licences
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Assemble the debug APK
+        working-directory: android
+        run: ./gradlew --no-daemon assembleDebug
+
+      - name: Locate the APK
+        id: apk
+        run: |
+          apk=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
+          if [ -z "$apk" ]; then
+            echo "No APK was produced." >&2
+            exit 1
+          fi
+          echo "path=$apk" >> "$GITHUB_OUTPUT"
+          echo "size=$(du -h "$apk" | cut -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: kavach-debug-apk
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Summarise
+        run: |
+          {
+            echo "### KAVACH debug APK"
+            echo
+            echo "- apk: \`${{ steps.apk.outputs.path }}\` (${{ steps.apk.outputs.size }})"
+            echo "- backend: ${{ steps.backend.outputs.configured == 'missing' && '**not configured** — see the warning above' || 'configured from the repository secret' }}"
+            echo "- signed with the debug keystore: installable by sideload, **not** for a store release"
+          } >> "$GITHUB_STEP_SUMMARY"

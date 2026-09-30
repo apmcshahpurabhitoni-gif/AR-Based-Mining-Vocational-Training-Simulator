@@ -1,6 +1,26 @@
-
 .env.local
 
 node_modules/
 tsconfig.tsbuildinfo
 dist/
+
+# Android wrapper (docs/17).
+#
+# The native project itself is committed — it is the source of the APK, and a
+# wrapper that only exists on one machine is not a build anyone can reproduce.
+# What is ignored is everything Gradle produces from it, plus the two things
+# Capacitor copies in from `dist/` on every sync, which would otherwise land in
+# a diff as a few thousand generated lines that no human wrote.
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
+android/capacitor-cordova-android-plugins/
+
+# Built artefacts (docs/17). The APK is a build output, not source.
+KAVACH-*-debug.apk
+KAVACH-*-release.apk
+android/local.properties

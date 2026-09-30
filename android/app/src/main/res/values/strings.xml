@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">KAVACH</string>
+    <string name="title_activity_main">KAVACH</string>
+    <string name="package_name">in.gov.sih26041.kavach</string>
+    <string name="custom_url_scheme">in.gov.sih26041.kavach</string>
+</resources>

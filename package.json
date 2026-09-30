@@ -15,25 +15,32 @@
     "convex:selftest": "convex run selftest:runSelfTest {\"suffix\":\"local\"}",
     "make:icons": "bun run scripts/make-icons.ts",
     "make:targets": "bun run scripts/make-targets.ts",
-    "make:packet": "bun run scripts/make-review-packet.ts"
+    "make:packet": "bun run scripts/make-review-packet.ts",
+    "android:sync": "bun run build && cap sync android",
+    "android:apk": "bun run android:sync && cd android && ./gradlew assembleDebug",
+    "android:release": "bun run android:sync && cd android && ./gradlew assembleRelease",
+    "android:open": "cap open android"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
     "clsx": "^2.1.1",
     "convex": "^1.46.0",
     "dexie": "^4.4.6",
     "dexie-react-hooks": "^4.4.0",
     "lucide-react": "^1.48.0",
+    "mind-ar": "1.2.5",
     "qrcode": "^1.5.4",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-router-dom": "^7.18.4",
-    "mind-ar": "1.2.5",
     "three": "^0.186.1"
   },
   "overrides": {
     "canvas": "file:./scripts/canvas-stub"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.2",
     "@napi-rs/canvas": "^1.0.9",
     "@tailwindcss/vite": "^4.3.3",
     "@types/bun": "^1.4.2",
