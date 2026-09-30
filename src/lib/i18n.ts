@@ -179,8 +179,8 @@ export const UI: Strings = {
    */
   "landing.status.title": { en: "Pre-pilot build", hi: "पायलट-पूर्व संस्करण" },
   "landing.status.body": {
-    en: "No certificate can be issued yet. One required module has a step awaiting qualified safety review, so that module cannot be completed — and a module that cannot be completed cannot be certified. Fire and explosion is complete and matches its specification. Nothing here is marked validated that is not.",
-    hi: "अभी कोई प्रमाणपत्र जारी नहीं किया जा सकता। एक आवश्यक मॉड्यूल में एक चरण योग्य सुरक्षा समीक्षा की प्रतीक्षा कर रहा है, इसलिए वह मॉड्यूल पूरा नहीं हो सकता — और जो मॉड्यूल पूरा नहीं हो सकता, उसका प्रमाणन नहीं हो सकता। अग्नि एवं विस्फोट पूरा है और अपने विनिर्देश से मेल खाता है। यहाँ कुछ भी अप्रमाणित दावा नहीं किया गया है।",
+    en: "No certificate can be issued yet. Neither module has yet had the qualified safety review that both module specifications name as a release blocker, and one gas step has no approved procedure at all — so that module cannot be completed, and a module that cannot be completed cannot be certified. Fire and explosion is complete and matches its specification exactly. Nothing here is marked validated that is not.",
+    hi: "अभी कोई प्रमाणपत्र जारी नहीं किया जा सकता। दोनों मॉड्यूल विनिर्देशों में बताई गई योग्य सुरक्षा समीक्षा अभी तक दोनों में पूरी नहीं हुई है, और गैस के एक चरण की कोई स्वीकृत प्रक्रिया है ही नहीं — इसलिए वह मॉड्यूल पूरा नहीं हो सकता, और जो मॉड्यूल पूरा नहीं हो सकता, उसका प्रमाणन नहीं हो सकता। अग्नि एवं विस्फोट पूरा है और अपने विनिर्देश से पूरी तरह मेल खाता है। यहाँ कुछ भी अप्रमाणित दावा नहीं किया गया है।",
   },
   "landing.step.train.body": {
     en: "Fire and explosion, then gas leak and confined space. Every step is graded, and a first-try miss on a critical step is recorded permanently. One gas step is still with the safety reviewer and is not yet trainable.",
