@@ -6,8 +6,19 @@
     <meta name="theme-color" content="#070A0F" />
     <meta
       name="description"
-      content="KAVACH — headset-free AR industrial safety training with a cold-retention certificate gate."
+      content="KAVACH — headset-free, offline-capable mining safety training with a cold-retention certificate gate."
     />
+
+    <!-- Installable on Android, per docs/09's PWA delivery path. Without the
+         manifest a trainee cannot put this on a home screen, which for a shared
+         site handset is the difference between used and forgotten. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="KAVACH" />
+
     <title>KAVACH · Industrial Safety Certification</title>
   </head>
   <body>

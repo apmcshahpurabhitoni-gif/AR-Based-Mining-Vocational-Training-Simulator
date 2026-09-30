@@ -26,7 +26,7 @@ import {
 import { MODULES, requireModule } from "./modules";
 import { scoreModule, scoreOverall } from "./scoring";
 import { evaluateGate, evaluateRecheck, sampleRecheckSteps } from "./gate";
-import { resolveARMode } from "./ar";
+import { resolveARMode, SHIPPED_MODES, type ARMode } from "./ar";
 import type { Locale, ModuleManifest, Step } from "./types";
 
 const FIRE = requireModule("FIRE");
@@ -137,13 +137,22 @@ describe("runner — construction", () => {
     expect(currentStep(state, FIRE)?.id).toBe("A-01");
   });
 
-  test("only reticle and guided are reachable", () => {
-    expect(resolveARMode("reticle")).toBe("reticle");
-    expect(resolveARMode("guided")).toBe("guided");
+  test("every shipped mode is reachable and the cut level is not", () => {
+    // The feature flag in one assertion: each member of SHIPPED_MODES must be
+    // both requested and resolved, so adding a level to the array without
+    // teaching this function about it fails here rather than on a phone.
+    for (const mode of SHIPPED_MODES) {
+      expect(resolveARMode(mode)).toBe(mode);
+    }
+    expect(SHIPPED_MODES).toContain("marker");
+    // L0 stays cut, and any unknown input resolves to the mode needing nothing.
     expect(resolveARMode("world")).toBe("guided");
-    expect(resolveARMode("marker")).toBe("guided");
     expect(resolveARMode(null)).toBe("guided");
     expect(resolveARMode(undefined)).toBe("guided");
+    // The union still carries the cut level, so re-enabling it is config not a
+    // refactor — docs/05 §2.
+    const stillInTheUnion: ARMode = "world";
+    expect(stillInTheUnion).toBe("world");
   });
 
   test("AR mode can be switched mid-run and falls back safely", () => {

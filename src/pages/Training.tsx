@@ -5,14 +5,20 @@
  * state machine says is current and dispatches taps back into it. No scoring
  * logic lives here — that is the whole reason the reducer is pure and tested.
  *
- * Two rendering modes ship (docs/05-ar-technical-spec.md §2):
+ * Three rendering modes ship (docs/05-ar-technical-spec.md §2/§3), plus the 3D
+ * training room, which docs/11 §C makes the primary development surface:
  *
+ *   L1 marker  — a printed marker found in the camera feed, with the object
+ *                drawn on it. The production presentation path. Needs printed
+ *                markers and a camera, so it is offered only on the steps whose
+ *                objects actually have one.
  *   L2 reticle — a live camera feed behind the targets, tapped in view. Needs
  *                a camera and nothing else prepared.
  *   L3 guided  — no camera. Targets are laid out as labelled affordances.
  *
- * Reticle falls back to guided automatically on denial, absence, or error, so
- * the demo cannot be blocked by a permissions prompt.
+ * Every one of them falls back rather than failing: marker and reticle fall back
+ * to guided on denial, absence, or error, so the demo cannot be blocked by a
+ * permissions prompt or a missing sheet of printed markers.
  */
 
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -25,17 +31,29 @@ import {
   Check,
   Eye,
   Hand,
+  ScanLine,
   Lightbulb,
   RotateCcw,
   TriangleAlert,
   X,
 } from "lucide-react";
-import type { SceneObject } from "../components/Scene3D";
+import type { RoomObject } from "../lib/room";
+import { objectsForStep } from "../lib/room";
+import { SHIPPED_MODES, type ShippedARMode } from "../lib/ar";
+import { hasARTarget } from "../lib/ar/targets";
+import { distractorsFor, markerLabel } from "../lib/markers";
 
 // Lazy so three.js is fetched only when a room is actually opened. The landing
 // page, the dashboard and the re-check never pay for it.
 const WalkRoom = lazy(() =>
   import("../components/Scene3D").then((m) => ({ default: m.Scene3D })),
+);
+
+// Lazy, and for a heavier reason than the room: MindAR pulls in TensorFlow.js
+// and a detector model. A trainee on a metered phone who never opens the AR view
+// must not download any of it.
+const ARView = lazy(() =>
+  import("../lib/ar/SceneAR").then((m) => ({ default: m.SceneAR })),
 );
 import { useSession, useT } from "../lib/session";
 import { Button, Chip } from "../components/ui";
@@ -253,35 +271,53 @@ export function Training({ manifest: manifestProp, phase = "training", sample, o
   // scene cannot be used to change an answer that has already been recorded.
   const locked = Boolean(currentRuntime(state, { steps: [step] } as ModuleManifest)?.resolved);
 
-  // The 3D room is the default on observe steps: "find the exit" is a
-  // navigation problem, and a navigation problem answered from a list of cards
-  // is not the thing being assessed. It is lazily imported, so nothing that
-  // does not open a room pays for three.js.
-  const [walk3d, setWalk3d] = useState(step.kind === "observe");
+  // The 3D room is the current primary training surface — docs/11 §C and
+  // docs/15 Phase 1/4. It is also a way out: on a shared or low-end handset
+  // the 2D scene may simply be the more usable surface. It is lazily imported,
+  // so nothing that does not open a room pays for three.js.
+  const [walk3d, setWalk3d] = useState(true);
 
-  // The step's own target, plus the existing distractor set, so there is more
-  // than one object in the room to tell apart. These ids are already part of
-  // the product; nothing here invents safety content.
-  const walkObjects = useMemo<SceneObject[]>(() => {
-    const own = (step.targets ?? []).map((t) => ({
-      id: t.id,
-      label: localise(t.label, locale),
-      x: t.position.x,
-      y: t.position.y,
-      isExit: t.id.includes("exit"),
-    }));
-    if (own.length === 0) return [];
-    return [
-      ...own,
-      ...DISTRACTORS.map((id, i) => ({
-        id,
-        label: id.replace(/-/g, " "),
-        x: 0.12 + ((i * 0.23) % 0.8),
-        y: 0.16 + ((i * 0.31) % 0.7),
-        isExit: false,
-      })),
-    ];
-  }, [step, locale]);
+  /**
+   * One dispatcher for every 3D-ish surface.
+   *
+   * The AR view and the 3D room both call this, and it is the only place either
+   * of them touches the runner. They dispatch the same semantic actions the card
+   * list dispatches, so `runner.ts`, `scoring.ts` and `gate.ts` cannot tell which
+   * surface answered — docs/11 §2. Neither surface ever sees a score.
+   */
+  const handleSelect = useCallback(
+    (id: string) => {
+      if (step.kind === "decide") dispatch({ type: "choose", choiceId: id });
+      else if (step.kind === "act") dispatch({ type: "perform", elementId: id });
+      else dispatch({ type: "tapTarget", targetId: id });
+    },
+    [step.kind, dispatch],
+  );
+
+  /**
+   * Whether L1 can present *this* step.
+   *
+   * Needs an `observe` step (a search task — decide and act steps compare and
+   * order options on screen) and at least one object with a printed marker.
+   */
+  const arAvailable = useMemo(
+    () => step.kind === "observe" && hasARTarget((step.targets ?? []).map((t) => t.id)),
+    [step],
+  );
+
+  // Every step kind gets a room. docs/12 and docs/13 both require all six
+  // steps of a module to be representable in the 3D training environment, so
+  // this builds three different rooms out of the one manifest contract. The
+  // rules live in lib/room.ts, where a test can prove the claim rather than a
+  // browser being asked to.
+  const walkObjects = useMemo<RoomObject[]>(
+    () => objectsForStep(step, manifest.code, locale, runtime?.actionCursor ?? 0),
+    [step, locale, manifest.code, runtime?.actionCursor],
+  );
+
+  // L1 is the production presentation path (docs/05 §3), so where it can run it
+  // does, and the 3D room becomes the fallback rather than the default.
+  const showAR = state.arMode === "marker" && arAvailable;
 
   return (
     <div className="space-y-6">
@@ -317,7 +353,14 @@ export function Training({ manifest: manifestProp, phase = "training", sample, o
           </button>
         )}
 
-        <ModeSwitch mode={state.arMode} onChange={setMode} />
+        <ModeSwitch
+          mode={state.arMode}
+          onChange={setMode}
+          // Offered only where it can actually work. Showing "marker" on a step
+          // with nothing printed to track would be a button that opens onto a
+          // camera looking for an object this step does not have.
+          markerAvailable={arAvailable}
+        />
       </header>
 
       {/* -- Progress ----------------------------------------------------- */}
@@ -354,7 +397,27 @@ export function Training({ manifest: manifestProp, phase = "training", sample, o
 
       {/* -- Scene ------------------------------------------------------- */}
       <div className="panel overflow-hidden">
-        {walk3d ? (
+        {showAR ? (
+          <div className="relative h-72 sm:h-96">
+            <Suspense
+              fallback={
+                <div className="grid h-full place-items-center font-mono text-[11px] uppercase tracking-widest text-fog-700">
+                  starting camera
+                </div>
+              }
+            >
+              <ARView
+                objects={walkObjects}
+                selectedId={runtime?.satisfiedTargets?.[0] ?? null}
+                onSelect={handleSelect}
+                // Camera refused or tracking could not start. The reticle is the
+                // nearest thing that still uses the camera; from there the
+                // existing fallback chain reaches the 3D room and the 2D scene.
+                onFallback={() => setMode("reticle")}
+              />
+            </Suspense>
+          </div>
+        ) : walk3d ? (
           <div className="relative h-72 sm:h-96">
             <Suspense
               fallback={
@@ -366,7 +429,7 @@ export function Training({ manifest: manifestProp, phase = "training", sample, o
               <WalkRoom
                 objects={walkObjects}
                 selectedId={runtime?.satisfiedTargets?.[0] ?? null}
-                onSelect={(id) => dispatch({ type: "tapTarget", targetId: id })}
+                onSelect={handleSelect}
                 onFallback={() => setWalk3d(false)}
               />
             </Suspense>
@@ -375,7 +438,10 @@ export function Training({ manifest: manifestProp, phase = "training", sample, o
           <Scene
             step={step}
             locale={locale}
-            arMode={state.arMode}
+            // The 2D surface has no marker mode. If marker was selected but this
+            // step has nothing printed to track, the reticle is the camera
+            // presentation that still works here.
+            arMode={state.arMode === "marker" ? "reticle" : state.arMode}
             locked={locked}
             onDispatch={dispatch}
             onFallback={() => setMode("guided")}
@@ -403,6 +469,7 @@ export function Training({ manifest: manifestProp, phase = "training", sample, o
             step={step}
             state={state}
             locale={locale}
+            moduleCode={manifest.code}
             onDispatch={dispatch}
           />
         </div>
@@ -649,11 +716,13 @@ function Interaction({
   step,
   state,
   locale,
+  moduleCode,
   onDispatch,
 }: {
   step: Step;
   state: RunnerState;
   locale: "en" | "hi" | "sat";
+  moduleCode: string;
   onDispatch: (action: RunnerAction) => void;
 }) {
   const locked = Boolean(currentRuntime(state, { steps: [step] } as ModuleManifest)?.resolved);
@@ -716,8 +785,13 @@ function Interaction({
           </button>
         ))}
         {/* Distractors. Tapping one is a graded miss, exactly like picking the
-            wrong extinguisher — the consequence teaches, the attempt records. */}
-        {DISTRACTORS.filter((d) => !(step.targets ?? []).some((tg) => tg.id === d)).map(
+            wrong extinguisher — the consequence teaches, the attempt records.
+            Same-module only: a gas room that offered a fire hose reel would
+            grade a gas consequence against an object from the wrong module. */}
+        {distractorsFor(
+          moduleCode,
+          (step.targets ?? []).map((tg) => tg.id),
+        ).map(
           (d) => (
             <button
               key={d}
@@ -789,12 +863,17 @@ function Interaction({
   );
 }
 
-const DISTRACTORS = [
-  "fire-hose-reel",
-  "switchboard",
-  "dust-extractor",
-  "conveyor-drive",
-];
+/**
+ * The marker vocabulary, from docs/05 §3. These are the only object ids this
+ * project has ever committed to, and each belongs to one module.
+ *
+ * The set they replaced (`fire-hose-reel`, `switchboard`, `dust-extractor`,
+ * `conveyor-drive`) appeared nowhere in any manifest, in any doc, or in any
+ * spec — it existed only in this file, and every one of those ids was wired
+ * straight into the grading path, so a miss recorded a real safety consequence
+ * against an object that does not exist in the module being trained.
+ */
+
 
 // ---------------------------------------------------------------------------
 // Feedback
@@ -875,32 +954,61 @@ function localise(value: Localised, locale: "en" | "hi" | "sat"): string {
   return value[locale] || value.en;
 }
 
+/**
+ * The AR-mode feature flag, surfaced.
+ *
+ * Read from `SHIPPED_MODES` rather than a literal list, so this control cannot
+ * offer a level the build does not implement — dropping `"marker"` from that
+ * array removes the button, with no change here.
+ */
 function ModeSwitch({
   mode,
   onChange,
+  markerAvailable,
 }: {
-  mode: "reticle" | "guided";
+  mode: ShippedARMode;
   onChange: (mode: ARMode) => void;
+  markerAvailable: boolean;
 }) {
   const t = useT();
   return (
     <div className="flex rounded-lg border border-ink-600 bg-ink-800 p-0.5">
-      {(["guided", "reticle"] as const).map((option) => (
-        <button
-          key={option}
-          type="button"
-          onClick={() => onChange(option)}
-          aria-pressed={mode === option}
-          title={option === "reticle" ? t("training.modeReticle") : t("training.modeGuided")}
-          className={clsx(
-            "flex items-center gap-1.5 rounded-md px-3 py-1.5 font-mono text-[11px] uppercase tracking-wider transition-colors",
-            mode === option ? "bg-amber-400 text-ink-950" : "text-fog-400 hover:text-fog-50",
-          )}
-        >
-          {option === "reticle" ? <Camera className="h-3.5 w-3.5" /> : <Hand className="h-3.5 w-3.5" />}
-          {option}
-        </button>
-      ))}
+      {SHIPPED_MODES.map((option) => {
+        const disabled = option === "marker" && !markerAvailable;
+        const label =
+          option === "marker"
+            ? t("training.modeMarker")
+            : option === "reticle"
+              ? t("training.modeReticle")
+              : t("training.modeGuided");
+        return (
+          <button
+            key={option}
+            type="button"
+            disabled={disabled}
+            onClick={() => onChange(option)}
+            aria-pressed={mode === option}
+            title={disabled ? "No printed marker for this step" : label}
+            className={clsx(
+              "flex items-center gap-1.5 rounded-md px-3 py-1.5 font-mono text-[11px] uppercase tracking-wider transition-colors",
+              disabled
+                ? "cursor-not-allowed text-fog-800"
+                : mode === option
+                  ? "bg-amber-400 text-ink-950"
+                  : "text-fog-400 hover:text-fog-50",
+            )}
+          >
+            {option === "marker" ? (
+              <ScanLine className="h-3.5 w-3.5" />
+            ) : option === "reticle" ? (
+              <Camera className="h-3.5 w-3.5" />
+            ) : (
+              <Hand className="h-3.5 w-3.5" />
+            )}
+            {option}
+          </button>
+        );
+      })}
     </div>
   );
 }

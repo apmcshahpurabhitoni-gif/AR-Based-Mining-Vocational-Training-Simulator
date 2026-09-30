@@ -75,6 +75,25 @@ class RootErrorBoundary extends Component<
   }
 }
 
+/**
+ * Register the offline shell — production only.
+ *
+ * Registering this in development would defeat `Cache-Control: no-store` in
+ * vite.config.ts: the dev server would start serving its own cached bundle and
+ * a code change would stop appearing, which is the same class of bug the SW is
+ * written to avoid. Dev has a network by definition, so it does not need a
+ * cache; production is where a mine floor with no signal does.
+ *
+ * Nothing is awaited and nothing is reported on failure. Offline support is an
+ * enhancement — the app is fully functional without it, and a failed
+ * registration must never be able to block the first render.
+ */
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  });
+}
+
 const container = document.getElementById("root");
 if (!container) throw new Error("Root element #root is missing from index.html");
 

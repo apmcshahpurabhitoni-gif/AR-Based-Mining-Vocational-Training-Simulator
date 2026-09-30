@@ -14,6 +14,7 @@
 import type { Localised, ModuleManifest, Step } from "./types";
 import { SHIPPED_LOCALES } from "./types";
 import { APPROVED_CRITICAL_STEPS, MODULES, MODULE_CODES } from "./modules";
+import { MARKERS, INTERACTABLES } from "./markers";
 
 export interface ContentIssue {
   /** `FIRE` or `FIRE/A-03` — precise enough to jump straight to the fix. */
@@ -102,6 +103,12 @@ export function validateManifest(manifest: ModuleManifest): ContentIssue[] {
     }
 
     // -- shape matches kind -------------------------------------------------
+    // Everything this step can be answered with must be drawable in the 3D
+    // training environment. docs/12 and docs/13 both require all six steps of a
+    // module to be representable there, so an option outside the vocabulary is
+    // a step the renderer cannot show.
+    const knownActions = new Set(INTERACTABLES[manifest.code] ?? []);
+
     if (step.kind === "decide") {
       const choices = step.choices ?? [];
       if (choices.length < 2) {
@@ -115,6 +122,17 @@ export function validateManifest(manifest: ModuleManifest): ContentIssue[] {
         });
       }
       for (const choice of choices) {
+        // A choice becomes a selectable object in the training space, so it
+        // must be one this project has actually defined. Same reasoning as the
+        // observe-target rule: an id nobody specified cannot be drawn, and a
+        // manifest that reaches past the vocabulary is how invented objects
+        // reach a trainee.
+        if (knownActions.size > 0 && !knownActions.has(choice.id)) {
+          issues.push({
+            where,
+            message: `choice "${choice.id}" is not in the ${manifest.code} interactable vocabulary (src/lib/markers.ts)`,
+          });
+        }
         checkLocalised(where, `choice "${choice.id}".label`, choice.label, issues);
         checkLocalised(where, `choice "${choice.id}".consequence`, choice.consequence, issues);
         // C8: a wrong answer with no misconception tag is a dead heatmap cell.
@@ -136,6 +154,18 @@ export function validateManifest(manifest: ModuleManifest): ContentIssue[] {
         issues.push({ where, message: "observe step needs at least one target" });
       }
       const targetIds = new Set(targets.map((t) => t.id));
+      // An observe target becomes a physical object in the training space, so
+      // it has to be an object this project has actually defined. This is the
+      // rule that keeps a module's room made of its own equipment.
+      const known = new Set(MARKERS[manifest.code] ?? []);
+      for (const target of targets) {
+        if (known.size > 0 && !known.has(target.id)) {
+          issues.push({
+            where,
+            message: `target "${target.id}" is not in the ${manifest.code} marker vocabulary (docs/05 §3)`,
+          });
+        }
+      }
       for (const target of targets) {
         checkLocalised(where, `target "${target.id}".label`, target.label, issues);
         if (target.position.x < 0 || target.position.x > 1 || target.position.y < 0 || target.position.y > 1) {
@@ -164,6 +194,14 @@ export function validateManifest(manifest: ModuleManifest): ContentIssue[] {
       } else if (step.action.elements.length === 0) {
         issues.push({ where, message: "act step has an empty action sequence" });
       } else if (step.action.type === "sequence") {
+        for (const element of step.action.elements) {
+          if (knownActions.size > 0 && !knownActions.has(element)) {
+            issues.push({
+              where,
+              message: `action element "${element}" is not in the ${manifest.code} interactable vocabulary (src/lib/markers.ts)`,
+            });
+          }
+        }
         const duplicates = step.action.elements.filter(
           (el, i) => step.action && step.action.elements.indexOf(el) !== i,
         );
@@ -242,6 +280,55 @@ export function validateAllModules(): ContentIssue[] {
 
   for (const code of MODULE_CODES) {
     issues.push(...validateManifest(MODULES[code]!));
+  }
+
+  // Every registered module needs a marker vocabulary, and no marker may
+  // belong to two of them. A shared marker would let a distractor cross a
+  // module boundary, which is how a gas room ends up offering a fire hose.
+  const markerOwner = new Map<string, string>();
+  for (const code of MODULE_CODES) {
+    const pool = MARKERS[code];
+    if (!pool || pool.length === 0) {
+      issues.push({ where: `module ${code}`, message: "has no marker vocabulary in src/lib/markers.ts" });
+      continue;
+    }
+    for (const marker of pool) {
+      const previous = markerOwner.get(marker);
+      if (previous) {
+        issues.push({
+          where: `module ${code}`,
+          message: `marker "${marker}" is also claimed by module ${previous}`,
+        });
+      }
+      markerOwner.set(marker, code);
+    }
+  }
+
+  // The same rule for the second vocabulary. Every module needs an
+  // interactable list, and no interactable may belong to two modules — the
+  // options on a decide step are the answer surface, so one leaking across a
+  // module boundary would offer a trainee a choice from a module they are not
+  // being assessed in.
+  const interactableOwner = new Map<string, string>();
+  for (const code of MODULE_CODES) {
+    const pool = INTERACTABLES[code];
+    if (!pool || pool.length === 0) {
+      issues.push({
+        where: `module ${code}`,
+        message: "has no interactable vocabulary in src/lib/markers.ts",
+      });
+      continue;
+    }
+    for (const id of pool) {
+      const previous = interactableOwner.get(id);
+      if (previous) {
+        issues.push({
+          where: `module ${code}`,
+          message: `interactable "${id}" is also claimed by module ${previous}`,
+        });
+      }
+      interactableOwner.set(id, code);
+    }
   }
 
   // Step ids must be globally unique: attempts are keyed by stepId, and the

@@ -1,0 +1,7 @@
+{
+  "name": "canvas",
+  "version": "2.11.2",
+  "description": "Stub for mind-ar's `canvas` dependency. Only mind-ar's Node offline compiler imports it, and this project compiles targets with @napi-rs/canvas instead.",
+  "main": "index.js",
+  "private": true
+}
