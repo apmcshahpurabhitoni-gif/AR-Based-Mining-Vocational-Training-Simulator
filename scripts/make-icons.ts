@@ -9,7 +9,10 @@
  * is a certificate that says a person was assessed, not merely shown a video.
  *
  * Run:  bun run scripts/make-icons.ts
- * Output: public/icons/*.png
+ * Output: public/icons/*.png, and the Android launcher icons and splash if the
+ *         `android/` project is present (see docs/17). Skipped rather than
+ *         failed when it is not, so the same command works before the wrapper
+ *         has been added.
  *
  * PNG is written by hand (IHDR/IDAT/IEND with zlib deflate) because pulling in
  * an image library to draw two rounded shapes would be a heavier dependency
@@ -17,7 +20,7 @@
  */
 
 import { deflateSync, crc32 } from "node:zlib";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 
 const INK: readonly [number, number, number] = [0x0b, 0x0f, 0x14]; // app background
 const AMBER: readonly [number, number, number] = [0xfb, 0xbf, 0x24]; // brand accent
@@ -115,12 +118,16 @@ function drawIcon(size: number, padding: number): Buffer {
 }
 
 /** Minimal PNG encoder: RGBA, 8-bit, no interlacing. */
-function encodePng(size: number, rgba: Buffer): Buffer {
-  // Raw scanlines, each prefixed with filter type 0.
-  const raw = Buffer.alloc((size * 4 + 1) * size);
-  for (let y = 0; y < size; y++) {
-    raw[y * (size * 4 + 1)] = 0;
-    rgba.copy(raw, y * (size * 4 + 1) + 1, y * size * 4, (y + 1) * size * 4);
+function encodePng(width: number, height: number, rgba: Buffer): Buffer {
+  // Raw scanlines, each prefixed with filter type 0. Width and height are
+  // separate because the Android splash is not square, and a landscape tablet
+  // splash drawn into a square buffer is the sort of thing that only shows up as
+  // a stretched logo on a phone nobody in the room has.
+  const stride = width * 4;
+  const raw = Buffer.alloc((stride + 1) * height);
+  for (let y = 0; y < height; y++) {
+    raw[y * (stride + 1)] = 0;
+    rgba.copy(raw, y * (stride + 1) + 1, y * stride, (y + 1) * stride);
   }
 
   const chunk = (type: string, data: Buffer): Buffer => {
@@ -134,8 +141,8 @@ function encodePng(size: number, rgba: Buffer): Buffer {
   };
 
   const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(size, 0);
-  ihdr.writeUInt32BE(size, 4);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
   ihdr[8] = 8; // bit depth
   ihdr[9] = 6; // colour type: RGBA
   ihdr[10] = 0; // deflate
@@ -161,7 +168,99 @@ const jobs: Array<[string, number, number]> = [
   ["public/icons/apple-touch-icon.png", 180, 0.06],
 ];
 
+/*
+ * The same mark, for Android — `docs/17`.
+ *
+ * Without this the APK ships with Capacitor's default launcher icon, which is
+ * the difference between an app a trainee was told to install and an app they
+ * cannot tell from a browser's shortcut. Sizes are the platform's own: the
+ * legacy square icon at 48dp-equivalent per density, and the adaptive-icon
+ * foreground at 108dp per density, which the launcher masks to a circle and
+ * then to whatever shape the phone's theme uses.
+ *
+ * The foreground is drawn with a much larger padding than the legacy icon,
+ * because the adaptive mask keeps only the middle 72 of those 108 units. A
+ * shield drawn to fill the canvas would be cropped to its own border.
+ */
+const ANDROID_DENSITIES: ReadonlyArray<readonly [string, number, number]> = [
+  ["mdpi", 48, 108],
+  ["hdpi", 72, 162],
+  ["xhdpi", 96, 216],
+  ["xxhdpi", 144, 324],
+  ["xxxhdpi", 192, 432],
+];
+
+for (const [density, legacy, foreground] of ANDROID_DENSITIES) {
+  const dir = `android/app/src/main/res/mipmap-${density}`;
+  if (!existsSync(dir)) continue;
+  const legacyIcon = encodePng(legacy, legacy, drawIcon(legacy, 0.08));
+  writeFileSync(`${dir}/ic_launcher.png`, legacyIcon);
+  writeFileSync(`${dir}/ic_launcher_round.png`, legacyIcon);
+  writeFileSync(
+    `${dir}/ic_launcher_foreground.png`,
+    encodePng(foreground, foreground, drawIcon(foreground, 0.26)),
+  );
+  console.log(`wrote ${dir}/ic_launcher{,_round,_foreground}.png (${legacy} / ${foreground})`);
+}
+
+/*
+ * The splash, which is the first thing anyone sees and the thing a screenshot
+ * of a locked phone shows. Ink, with the mark centred, at each density's own
+ * portrait and landscape size. Same rule as the icons: generated, committed, and
+ * regenerable — no binary in the repo that nobody can reproduce.
+ */
+const SPLASH_SIZES: ReadonlyArray<readonly [string, number, number]> = [
+  ["drawable-port-mdpi", 320, 480],
+  ["drawable-port-hdpi", 480, 800],
+  ["drawable-port-xhdpi", 720, 1280],
+  ["drawable-port-xxhdpi", 960, 1600],
+  ["drawable-port-xxxhdpi", 1280, 1920],
+  ["drawable-land-mdpi", 480, 320],
+  ["drawable-land-hdpi", 800, 480],
+  ["drawable-land-xhdpi", 1280, 720],
+  ["drawable-land-xxhdpi", 1600, 960],
+  ["drawable-land-xxxhdpi", 1920, 1280],
+];
+
+/** Ink with the mark centred, at a size that is not square. */
+function drawSplash(width: number, height: number): Buffer {
+  const px = Buffer.alloc(width * height * 4);
+  // The mark is sized off the short edge, so it is the same apparent size in
+  // portrait and on a tablet.
+  const mark = Math.round(Math.min(width, height) * 0.34);
+  const markX = drawIcon(mark, 0.04);
+  const ox = Math.round((width - mark) / 2);
+  const oy = Math.round((height - mark) / 2);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      const insideMark = x >= ox && x < ox + mark && y >= oy && y < oy + mark;
+      if (insideMark) {
+        const s = ((y - oy) * mark + (x - ox)) * 4;
+        px[i] = markX[s] as number;
+        px[i + 1] = markX[s + 1] as number;
+        px[i + 2] = markX[s + 2] as number;
+      } else {
+        px[i] = INK[0];
+        px[i + 1] = INK[1];
+        px[i + 2] = INK[2];
+      }
+      px[i + 3] = 255;
+    }
+  }
+  return px;
+}
+
+for (const [dir, width, height] of SPLASH_SIZES) {
+  if (!existsSync(`android/app/src/main/res/${dir}`)) continue;
+  writeFileSync(
+    `android/app/src/main/res/${dir}/splash.png`,
+    encodePng(width, height, drawSplash(width, height)),
+  );
+  console.log(`wrote android/app/src/main/res/${dir}/splash.png (${width}x${height})`);
+}
+
 for (const [path, size, padding] of jobs) {
-  writeFileSync(path, encodePng(size, drawIcon(size, padding)));
+  writeFileSync(path, encodePng(size, size, drawIcon(size, padding)));
   console.log(`wrote ${path} (${size}x${size})`);
 }

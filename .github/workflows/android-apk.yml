@@ -1,0 +1,116 @@
+# Builds the KAVACH Android APK.
+#
+# The app itself is a web app; this is the wrapper that turns it into something a
+# trainee can be handed as a file. See docs/17.
+#
+# What it produces is a **debug-signed** APK, which is the right artefact for a
+# pilot: Android signs debug builds with a generated keystore, so it installs by
+# sideload with no secrets, no store account and no signing key to lose. A
+# release build needs a keystore we hold and is a separate, deliberate step.
+#
+# This runs `scripts/build-apk.sh` rather than assembling the toolchain out of
+# separate actions, and that is the whole design: the script is the documented
+# way to build an APK on a machine that has never built one, so if CI used a
+# different set of actions it would be testing a path nobody uses and would not
+# catch the script breaking. One code path, exercised by both.
+#
+# It does mean the SDK is downloaded on every run rather than cached. That is
+# the price, and it is about two minutes of a five-minute job.
+
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # One APK build at a time. Two of these race on the same Gradle cache and the
+  # loser fails for reasons that have nothing to do with the app.
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    name: assemble debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - uses: actions/setup-java@v4
+        with:
+          # Capacitor 8 targets Java 21, and Android Gradle Plugin 8.13 wants 17
+          # or newer. The build script checks for this and only falls back to
+          # installing a JDK itself when there is not one — which is what makes
+          # the same script work on a bare machine.
+          distribution: temurin
+          java-version: '21'
+
+      # The backend URL is baked into the bundle at build time, not fetched at
+      # runtime, so an APK built without it points at its own local origin and
+      # cannot reach the assessment backend. It is a repository secret because it
+      # is deployment configuration, not source.
+      #
+      # The build does NOT fail when it is absent: the app runs, the room works,
+      # and the offline paths work — a backend-dependent step simply reports the
+      # backend as unreachable, which is the behaviour the app already has. A red
+      # build for a missing secret would be a worse first experience than a
+      # warning on a working artefact.
+      - name: Resolve the backend URL
+        id: backend
+        env:
+          CONVEX_URL: ${{ secrets.VITE_CONVEX_URL }}
+        run: |
+          # Every line written to $GITHUB_OUTPUT must be `name=value`. A bare
+          # word is not a warning, it is a hard error — and it fails the whole
+          # job at this step, before the Android build has run at all, which
+          # looks like a toolchain failure and is not one.
+          if [ -n "$CONVEX_URL" ]; then
+            echo "url=$CONVEX_URL" >> "$GITHUB_OUTPUT"
+            echo "configured=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "url=" >> "$GITHUB_OUTPUT"
+            echo "configured=missing" >> "$GITHUB_OUTPUT"
+            echo "::warning title=APK has no backend URL::VITE_CONVEX_URL is not set, so this APK cannot reach the assessment backend. Everything offline still works. Set the repository secret and re-run before a pilot."
+          fi
+
+      - name: Build the APK
+        env:
+          VITE_CONVEX_URL: ${{ steps.backend.outputs.url }}
+          # Under the runner's home rather than /opt, because CI does not need
+          # root and does not get it by default.
+          TOOLCHAIN_DIR: ${{ github.workspace }}/.toolchain
+        run: sh scripts/build-apk.sh
+
+      - name: Upload the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: kavach-debug-apk
+          path: KAVACH-*-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Summarise
+        run: |
+          {
+            echo "### KAVACH debug APK"
+            echo
+            echo "- size: $(du -h KAVACH-*-debug.apk | cut -f1)"
+            if [ "${{ steps.backend.outputs.configured }}" = "missing" ]; then
+              echo "- backend: **not configured** — see the warning above"
+            else
+              echo "- backend: configured from the repository secret"
+            fi
+            echo "- signed with the debug keystore: installable by sideload, **not** for a store release"
+            echo "- **not run on a handset.** Build and install are proven; behaviour on a device is not."
+          } >> "$GITHUB_STEP_SUMMARY"

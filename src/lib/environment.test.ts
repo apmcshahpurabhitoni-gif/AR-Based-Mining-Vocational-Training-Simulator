@@ -95,6 +95,71 @@ describe("scenery is inert, and provably so", () => {
   });
 });
 
+describe("the locations the design board names, and the room had not", () => {
+  // `docs/16` phase 3. Nine of the board's fourteen locations were already
+  // here. These are the ones that were missing, and the test is here so the
+  // board and the room cannot quietly drift apart again.
+  const present = new Set(SCENERY.map((item) => item.id));
+
+  test.each([
+    ["assembly-yard", "the assembly point at the end of the route"],
+    ["refuge-alcove", "the refuge chamber"],
+    ["generator-cage", "the generator cage"],
+    ["gas-rack", "the gas cylinders"],
+    ["monitor-left", "the wall monitor in the training area"],
+    ["whiteboard-left", "the whiteboard beside the bench"],
+  ])("%s is in the room — %s", (id) => {
+    expect(present.has(id)).toBe(true);
+  });
+
+  test("the two places a trainee must be able to reach have floor to stand on", () => {
+    // A refuge chamber you cannot walk up to is a picture. Both claim a body a
+    // person can stand in front of, which is the difference between scenery
+    // that is a place and scenery that is a texture.
+    for (const id of ["assembly-yard", "refuge-alcove"]) {
+      const item = SCENERY.find((s) => s.id === id);
+      expect(item).toBeDefined();
+      if (!item) continue;
+      expect(onFloor(item)).toBe(true);
+      expect(SCENERY_FOOTPRINT[item.kind]?.r).toBeGreaterThan(1);
+    }
+  });
+
+  test("the new wall kit hangs above walking height and claims no floor", () => {
+    // The monitor and the whiteboard are on the wall the training happens
+    // against. Giving them a footprint would make the layout test reject a
+    // perfectly good room, and would wall off an aisle nobody needs walled off.
+    for (const id of ["monitor-left", "whiteboard-left"]) {
+      const item = SCENERY.find((s) => s.id === id);
+      expect(item).toBeDefined();
+      if (!item) continue;
+      expect(onFloor(item)).toBe(false);
+      expect(SCENERY_FOOTPRINT[item.kind]).toBeUndefined();
+    }
+  });
+
+  test("nothing in the room is named after a marker a step can be answered with", () => {
+    // The specific pair that phase 3 could have got wrong. `assembly-point` and
+    // `refuge-chamber` are real gradable ids, so the scenery beside them is
+    // `assembly-yard` and `refuge-alcove` — and a step that answers
+    // `refuge-chamber` is not answered by tapping the wall next to it.
+    for (const id of ["assembly-point", "refuge-chamber", "gas-cylinder", "valve-main"]) {
+      expect(present.has(id)).toBe(false);
+    }
+  });
+
+  test("the landmarks are a small set of nouns, and the panel cannot invent more", () => {
+    // Counted here as well as in `landmarks.test.ts` because this is the table
+    // the panel is derived from: a landmark added without a name would render a
+    // blank row in the Find and Learn list.
+    for (const item of SCENERY) {
+      if (item.landmark === undefined) continue;
+      expect(item.landmark.length).toBeGreaterThan(2);
+      expect(item.landmark.split(/\s+/).length).toBeLessThanOrEqual(3);
+    }
+  });
+});
+
 describe("the layout is walkable", () => {
   test("everything is inside the room", () => {
     for (const item of SCENERY) {

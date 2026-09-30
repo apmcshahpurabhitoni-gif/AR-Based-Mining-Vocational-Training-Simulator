@@ -23,10 +23,11 @@ Government of Jharkhand · Mining & Manufacturing
 | GAS step 4 (withdraw / remain outside) | **Blocked** — awaiting qualified safety review | fails closed: no certificate for GAS until supplied |
 
 ```
-bun test          # 75 unit + integration tests
+bun test          # 387 unit + integration tests
 bun typecheck     # clean
 bun convex:dev    # push schema
 bun convex:selftest  # 9 checks against the live database
+bun run android:apk  # build the APK (needs a JDK 21 + Android SDK)
 ```
 
 | Doc | Contents |
@@ -41,6 +42,8 @@ bun convex:selftest  # 9 checks against the live database
 | [08 — Demo Script](docs/08-demo-script.md) | The 120-second run, pitch, judge Q&A bank, failure contingency |
 | [12 / 13 — Module Specs](docs/12-FIRE-MODULE-SPEC.md) | The frozen FIRE and GAS contracts, including the **release-blocking safety review** |
 | [**R9 — Safety Review Packet**](docs/R9-SAFETY-REVIEW-PACKET.md) | **What the safety reviewer is being asked to sign off**, generated from the manifests |
+| [16 — 3D Bay & Controls](docs/16-3d-environment-and-controls-plan.md) | The room and its controls, phase by phase: what was built, what was not, and why |
+| [17 — The Android APK](docs/17-android-apk.md) | The Capacitor wrapper, and how a build of it actually happens |
 
 Read **01** first — it constrains everything else.
 
@@ -54,6 +57,17 @@ bun run make:packet      # regenerate after any content change
 
 A test compares the committed file against a fresh render, so editing a manifest
 without regenerating fails the build.
+
+### Delivering it
+
+Two ways, from the same build:
+
+- **The web app / PWA** — installable from the browser, offline-capable, updates
+  itself. This is the primary route and it needs nothing.
+- **An Android APK** — a Capacitor wrapper in `android/`, built by
+  `sh scripts/build-apk.sh` (or by `.github/workflows/android-apk.yml` on CI)
+  into a debug-signed APK you can sideload. Needs a JDK 21 and the Android SDK,
+  which the script installs. See [docs/17](docs/17-android-apk.md).
 
 ---
 

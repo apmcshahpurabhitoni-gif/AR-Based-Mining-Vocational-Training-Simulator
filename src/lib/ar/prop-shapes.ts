@@ -369,6 +369,133 @@ export function buildScenery(kind: SceneryKind, keep: (g: BufferGeometry) => Buf
     return group;
   }
 
+  if (kind === "assembly-yard") {
+    // A painted square on the floor with a post and a board over it.
+    //
+    // The board is blank on purpose. What stands at an assembly point says what
+    // to do when you get there, and that is safety copy — R9's, not a
+    // renderer's. The painted square is geometry; the words are not, so the
+    // words are absent until the review lands.
+    const paint = mat("#c9a227", { rough: 0.95 });
+    const post = mat("#8a919b", { rough: 0.5, metal: 0.5 });
+    const board = mat("#e8eaed", { rough: 0.7 });
+    for (const [dx, dz, w, d] of [
+      [0, -1.6, 3.2, 0.22],
+      [0, 1.6, 3.2, 0.22],
+      [-1.6, 0, 0.22, 3.2],
+      [1.6, 0, 0.22, 3.2],
+    ] as const) {
+      put(new BoxGeometry(w, 0.03, d), paint, [dx, 0.015, dz]);
+    }
+    put(new CylinderGeometry(0.07, 0.07, 2.3, 8), post, [0, 1.15, 0]);
+    put(new BoxGeometry(1.1, 0.7, 0.07), board, [0, 2.4, 0]);
+    return group;
+  }
+
+  if (kind === "refuge-alcove") {
+    // A chamber built into the side of the bay: three solid walls, an open face,
+    // and a bench inside. It reads as a refuge at a glance because of the
+    // silhouette — a box in a bay full of open floor.
+    const shell = mat("#9aa3ad", { rough: 0.7, metal: 0.2 });
+    const frame = mat("#16a34a", { rough: 0.7 });
+    const seat = mat("#4b5563", { rough: 0.85 });
+    put(new BoxGeometry(2.6, 2.6, 0.16), shell, [0, 1.3, -1.2]);
+    put(new BoxGeometry(0.16, 2.6, 2.4), shell, [-1.3, 1.3, 0]);
+    put(new BoxGeometry(0.16, 2.6, 2.4), shell, [1.3, 1.3, 0]);
+    put(new BoxGeometry(2.9, 0.18, 2.6), shell, [0, 2.7, 0]);
+    // The green frame round the opening: the one piece of the room a trainee
+    // can find from across the floor, which is the entire job of it here.
+    put(new BoxGeometry(2.6, 0.16, 0.2), frame, [0, 2.5, 1.2]);
+    for (const dx of [-1.3, 1.3]) put(new BoxGeometry(0.2, 2.6, 0.2), frame, [dx, 1.3, 1.2]);
+    put(new BoxGeometry(1.8, 0.12, 0.5), seat, [0, 0.62, -0.85]);
+    for (const dx of [-0.8, 0.8]) put(new BoxGeometry(0.1, 0.56, 0.4), seat, [dx, 0.3, -0.85]);
+    return group;
+  }
+
+  if (kind === "generator-cage") {
+    // A mesh cage with a genset inside. The bars are the silhouette: a box you
+    // can see into, which is why it is drawn as a frame rather than a solid.
+    const bar = mat("#6b7280", { rough: 0.5, metal: 0.6 });
+    const plant = mat("#b45309", { rough: 0.7 });
+    const skid = mat("#374151", { rough: 0.8 });
+    put(new BoxGeometry(2.2, 0.16, 1.6), skid, [0, 0.08, 0]);
+    put(new BoxGeometry(1.5, 0.9, 1.0), plant, [0, 0.6, 0]);
+    put(new CylinderGeometry(0.16, 0.16, 0.7, 10), bar, [0.55, 1.35, 0]);
+    for (let i = -1; i <= 1; i++) {
+      for (const dz of [-0.8, 0.8]) {
+        put(new BoxGeometry(0.07, 2.0, 0.07), bar, [i * 1.1, 1.0, dz]);
+      }
+      for (const dx of [-1.1, 1.1]) {
+        put(new BoxGeometry(0.07, 2.0, 0.07), bar, [dx, 1.0, i * 0.8]);
+      }
+    }
+    for (const y of [0.2, 1.0, 1.8]) {
+      put(new BoxGeometry(2.3, 0.06, 0.06), bar, [0, y, -0.8]);
+      put(new BoxGeometry(2.3, 0.06, 0.06), bar, [0, y, 0.8]);
+    }
+    for (let i = -2; i <= 2; i++) {
+      put(new BoxGeometry(0.05, 1.8, 0.05), bar, [i * 0.44, 1.0, -0.8]);
+      put(new BoxGeometry(0.05, 1.8, 0.05), bar, [i * 0.44, 1.0, 0.8]);
+    }
+    return group;
+  }
+
+  if (kind === "gas-rack") {
+    // Bottles in a rack. Bands and a valve cap each, so a row of them reads as
+    // cylinders rather than as a row of pillars.
+    const bottle = mat("#2f6f4f", { rough: 0.6, metal: 0.3 });
+    const band = mat("#d9b310", { rough: 0.7 });
+    const frame = mat("#5a6470", { rough: 0.5, metal: 0.5 });
+    put(new BoxGeometry(2.0, 0.1, 0.8), frame, [0, 0.05, 0]);
+    for (const dx of [-0.95, 0.95]) put(new BoxGeometry(0.08, 1.4, 0.8), frame, [dx, 0.7, 0]);
+    for (const [i, dx] of [-0.62, 0, 0.62].entries()) {
+      const h = 1.25 - (i === 1 ? 0.12 : 0);
+      put(new CylinderGeometry(0.21, 0.21, h, 12), bottle, [dx, 0.1 + h / 2, 0]);
+      put(new CylinderGeometry(0.22, 0.22, 0.07, 12), band, [dx, 0.1 + h * 0.55, 0]);
+      put(new CylinderGeometry(0.09, 0.11, 0.16, 8), frame, [dx, 0.1 + h + 0.07, 0]);
+    }
+    return group;
+  }
+
+  if (kind === "monitor") {
+    // A wall screen. Lit, because in a bay this dark a screen is the brightest
+    // thing on the wall and that is exactly how one catches the eye.
+    put(new BoxGeometry(1.5, 0.86, 0.1), mat("#2b3038", { rough: 0.5 }), [0, 0, 0]);
+    put(
+      new BoxGeometry(1.36, 0.72, 0.03),
+      new MeshStandardMaterial({ color: "#1d4ed8", emissive: "#0b1f4d", roughness: 0.35 }),
+      [0, 0, 0.06],
+    );
+    put(new BoxGeometry(0.4, 0.1, 0.06), mat("#111418"), [0, -0.52, 0.05]);
+    return group;
+  }
+
+  if (kind === "whiteboard") {
+    // A whiteboard, wiped. The writing on it is the training content and is
+    // not authored here; an empty board is the honest pending state.
+    put(new BoxGeometry(1.8, 1.15, 0.07), mat("#f4f5f7", { rough: 0.35 }), [0, 0, 0]);
+    put(new BoxGeometry(1.9, 1.25, 0.05), mat("#9aa3ad", { rough: 0.5, metal: 0.4 }), [0, 0, -0.04]);
+    put(new BoxGeometry(1.7, 0.05, 0.1), mat("#6b7280", { rough: 0.5 }), [0, -0.62, 0.06]);
+    return group;
+  }
+
+  if (kind === "chair") {
+    // A stool. Three legs and a seat is the whole silhouette at the distances
+    // this room is seen from.
+    const frame = mat("#4b5563", { rough: 0.5, metal: 0.5 });
+    const seat = mat("#6b5136", { rough: 0.9 });
+    put(new CylinderGeometry(0.28, 0.28, 0.08, 12), seat, [0, 0.46, 0]);
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI * 2;
+      put(new CylinderGeometry(0.03, 0.03, 0.46, 6), frame, [Math.cos(a) * 0.18, 0.23, Math.sin(a) * 0.18], [
+        Math.sin(a) * 0.12,
+        0,
+        -Math.cos(a) * 0.12,
+      ]);
+    }
+    return group;
+  }
+
   // pipe-run — the service line across the roof.
   put(
     new CylinderGeometry(0.14, 0.14, ROOM.width - 1.2, 10),

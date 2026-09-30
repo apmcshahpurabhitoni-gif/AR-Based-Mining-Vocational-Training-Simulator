@@ -121,6 +121,59 @@ export async function localSessions(): Promise<LocalSession[]> {
   return rows;
 }
 
+/**
+ * The most recent run per module, as raw attempt events.
+ *
+ * Read from the same `queue` table the sync engine uses, and deliberately
+ * *including* rows already marked uploaded: a synced attempt is still the
+ * trainee's evidence of how they performed, and dropping it the moment it
+ * reaches the server would make the local report flicker with connectivity
+ * rather than with training. The server recomputes authoritatively from its
+ * own copy — this is a local read, not a second source of truth.
+ *
+ * Only the LATEST session per module. A retake must not blend into the run
+ * before it: `scoreModule` groups attempts by step id, so two runs' rows for
+ * the same step would merge into one history and the trainee's most recent,
+ * honest attempt would be averaged against an older one. That is the exact
+ * thing the product promises never to do — "the gate always evaluates the
+ * latest honest attempt".
+ */
+export async function localEventsByModule(): Promise<Map<string, AttemptEvent[]>> {
+  const [rows, sessions] = await Promise.all([db.queue.toArray(), localSessions()]);
+
+  // Newest session per module, by start time. `sessions` is already sorted
+  // newest-first, so the first match wins.
+  const latest = new Map<string, string>();
+  for (const session of sessions) {
+    if (!latest.has(session.moduleCode)) latest.set(session.moduleCode, session.clientSessionId);
+  }
+
+  // Fall back to the events themselves when no session row survives — a
+  // half-written run must still show what it recorded rather than nothing.
+  const latestByEventTs = new Map<string, { sessionId: string; ts: number }>();
+  for (const row of rows) {
+    const seen = latestByEventTs.get(row.moduleCode);
+    if (!seen || row.clientTs > seen.ts) {
+      latestByEventTs.set(row.moduleCode, { sessionId: row.sessionId, ts: row.clientTs });
+    }
+  }
+  for (const [moduleCode, entry] of latestByEventTs) {
+    if (!latest.has(moduleCode)) latest.set(moduleCode, entry.sessionId);
+  }
+
+  const grouped = new Map<string, AttemptEvent[]>();
+  for (const row of rows) {
+    if (latest.get(row.moduleCode) !== row.sessionId) continue;
+    const bucket = grouped.get(row.moduleCode);
+    if (bucket) bucket.push(row);
+    else grouped.set(row.moduleCode, [row]);
+  }
+  for (const bucket of grouped.values()) {
+    bucket.sort((a, b) => a.clientTs - b.clientTs || a.eventId.localeCompare(b.eventId));
+  }
+  return grouped;
+}
+
 /** Wipe everything. Used by sign-out, which must not leave telemetry behind. */
 export async function clearLocalData(): Promise<void> {
   await db.transaction("rw", [db.queue, db.sessions], async () => {
