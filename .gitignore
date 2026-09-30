@@ -24,3 +24,6 @@ android/capacitor-cordova-android-plugins/
 KAVACH-*-debug.apk
 KAVACH-*-release.apk
 android/local.properties
+# The Android toolchain, when scripts/build-apk.sh is pointed inside the repo
+# (which is what CI does, because a runner has no root and no /opt).
+.toolchain/
