@@ -27,30 +27,38 @@ available beat is the refusal. See §1.1.
 
 ## 1. The 120 seconds
 
-**Setup before the judge arrives:** phone on airplane mode, language preset to **Hindi**, dashboard
-seeded, a second phone on the verification page. **No markers, no taped walls, no printed
-materials** — the demo runs on L2 reticle, which needs nothing prepared.
+**Setup before the judge arrives:** phone in **Hindi**, dashboard seeded, **network available**
+(see §1.2 — three beats of this script need a server and the original version staged all 120
+seconds in airplane mode), a second phone on the verification page. **No markers, no taped walls, no
+printed materials** — the demo runs on L2 reticle, which needs nothing prepared.
 
 ```
-0:00  Hand them the phone. It's already offline. Already in Hindi.
+0:00  Hand them the phone. Already in Hindi.
       "This is a real mine gallery in Dhanbad. Training cost us nothing
        to deliver and installed nothing on your phone."
 
 0:10  They walk. Camera shows the real room. The exit sign lights up.
-      Instruction arrives in AUDIO — they don't read, they listen.
+      [NO AUDIO — the build has no narration yet. Read the Hindi instruction
+       aloud yourself as they read it. See §1.2.]
       They tap the exit. Step passes.
 
 0:25  Step A-03. "सही बुझावा चुनो" — pick the right extinguisher.
       They pick WATER — the wrong answer.
       >>> The failure beat. <<<
-      Screen darkens. Smoke. Alarm. Countdown starts.
-      Certificate panel visibly flips to LOCKED — on their screen.
+      The step is refused on the spot. It is marked critical, so the miss is
+      recorded permanently, and they are sent back to it.
+      [The screen does NOT show a certificate panel flipping to LOCKED —
+       there is no live certificate panel during training. The verdict is
+       computed on the server. See §1.2.]
 
 0:45  "Paani. Live electrical par paani Conduct karta hai — operator mar
-       sakta hai. Certificate tab tak locked hai jab tak aap dobara
-       sahi jawab nahi dete."
-      They pick CO₂. Pass. LOCKED → ISSUED-eligible.
-      Audience sees the gate is real, not a progress bar.
+       sakta hai. Yeh step critical hai — isliye aapki pehli galti
+       hamesha ke liye darj ho gayi, aur aapko ise dobara karna hoga."
+      [Water conducts on live electrical work — it can kill an operator. This
+       step is critical, so your first miss is on the record permanently and
+       you have to do it again.]
+      They pick CO₂. Pass.
+      Audience sees the assessment is a real gate, not a progress bar.
 
 1:05  Module B, fast — gas leak, PPE, buddy system.
       They fail B-03 (solo entry). Hard block. "Nobody enters alone."
@@ -65,11 +73,16 @@ materials** — the demo runs on L2 reticle, which needs nothing prepared.
        [That step has not been approved by a safety engineer. So we do not
         teach it, and without it the gas module cannot be completed.]
 
-1:45  Result screen. The gate lists G1 unmet. Certificate: REFUSED.
-      "Aapne perfect training kiya — aur certificate nahi mila. Yehhi
-       reason hai ki yeh attendance receipt nahi hai."
-       [You did perfect training — and got no certificate. That is exactly
-        why this is not an attendance receipt.]
+1:45  Stay on the B-04 screen. Do not open the Result page — offline it says
+      only that results are not available yet, because the gate verdict is
+      computed on the server. That is the honest state and it is the state
+      that matters.
+      "Aapne perfect training kiya — aur certificate nahi mila. Ek zaroori
+       module approve nahi hua, isliye humne pura certification rok diya.
+       Yehhi reason hai ki yeh attendance receipt nahi hai."
+       [You did perfect training — and got no certificate. One required
+        module has not been approved, so we stopped the whole certification.
+        That is exactly why this is not an attendance receipt.]
 
 2:00  "Every other system would have issued it. We didn't. Jab tak har
        zaroori module safety-approved nahi hota, hum certificate nahi
@@ -87,6 +100,34 @@ materials** — the demo runs on L2 reticle, which needs nothing prepared.
    et al. (2026) finding live.
 
 **Everything else is supporting evidence. Do not reorder these.**
+
+### 1.2 What this build can and cannot show — check before rehearsing
+
+Verified against the source, 2026-09-30. Every claim below was checked; the two that
+failed are the reason this section exists.
+
+| Claim | Real? | Notes |
+|---|---|---|
+| Room, steps, tap-to-walk, 3D bay, L2 reticle, L3 fallback | **Yes** | The primary surface. Offline-capable. |
+| Wrong answer refused on the spot, critical miss recorded, retry forced | **Yes** | Runner-side, entirely local. Works in airplane mode. |
+| Hindi / English text throughout | **Yes** | |
+| A-01 "no markers, no setup" | **Yes** | L2 needs no printed material. |
+| Instruction arrives in **AUDIO** | **No** | `narrationKey` exists in the manifest and **nothing consumes it**: no `speechSynthesis`, no `<audio>`, no audio files. Read instructions aloud yourself. |
+| Certificate panel flips to **LOCKED** live during training | **No** | No live certificate panel exists. The only local scoring is a session-history number; the gate verdict is server-side. |
+| **COLD RE-CHECK** beat | **Needs a server** | Sampling and scoring run in Convex. The sampler also prioritises critical steps, so it would offer the pending B-04. |
+| **Result screen / certificate issued / QR** | **Needs a server** *and* is impossible anyway | The gate is server-computed, and it cannot pass while a required module is unapproved. |
+
+**Offline truth:** the *app shell* is offline-capable — it loads from cache, runs the whole
+training flow, scores locally, queues attempts for later sync. The *verdict* — gate criteria,
+certificate, QR, re-check — is server-computed and is not available with no network. Do not
+conflate the two, because a judge will.
+
+**If you want the server beats**, turn the network on deliberately and say so: *"ab main
+server wala hissa dikhata hoon."* [Now I will show the server side.] Never let the network
+be the reason a beat silently fails.
+
+**If you want a pure airplane-mode proof**, the 0:10–1:35 sequence works end to end: that is
+the real offline claim, and it is a good one.
 
 ---
 
@@ -198,10 +239,13 @@ half-translates and hides it has told the judge the safety review was skipped.
 > The ladder is still in the codebase if you want to see it."
 
 **"How is this not just an app?"**
-> "It runs offline. We've got it in airplane mode. Training, scoring, audio, and offline certificate
-> verification all work with no network — events queue and sync when you reconnect. Eneza proved
-> this model in Kenya over SMS; we're applying it to industrial safety where the consequence of
-> getting it wrong is a fatality."
+> "It runs offline. We've got it in airplane mode. Training, scoring and the whole assessment loop
+> work with no network — events queue and sync when you reconnect. The certificate verdict is
+> computed on the server, and the QR verifies offline once issued. Eneza proved this model in Kenya
+> over SMS; we're applying it to industrial safety where the consequence of getting it wrong is a
+> fatality."
+>
+> *Do not add audio to this answer — there is no audio narration in this build. See §1.2.*
 
 **"What's your business model?"**
 > "Licence-free software. That's the point — the reason VR never reached a small operator is that
@@ -235,7 +279,8 @@ half-translates and hides it has told the judge the safety review was skipped.
 | **No network** | Already the plan. Lead with it: *"This is airplane mode."* |
 | **Desktop / no phone** | L3 runs in a browser. Steps still work, tapped on screen. |
 | **Hindi font renders wrong** | Self-hosted, should not happen. If it does, switch to English and say so plainly. |
-| **Audio missing** | English audio with Hindi text on screen. Say it's partial. |
+| **Audio asked for** | There is no audio narration in this build. Say so plainly and read the instruction aloud: *"is build mein awaaz nahi hai abhi — main padh ke sunata hoon."* Do not claim it exists. |
+| **Asked for the cold re-check / certificate** | Needs the server, and the certificate cannot issue while a required module is unapproved. Demo the refusal (§1.2) — it is the stronger answer. |
 | **App crashes** | Have a 30-second screen recording as the fallback. Do not debug live. |
 | **Judge's phone is ancient** | L3 handles it. This is why the ladder exists. |
 | **Ran out of time** | Jump straight to the B-04 refusal. It's the strongest 20 seconds *in this build*. |
@@ -252,7 +297,6 @@ half-translates and hides it has told the judge the safety review was skipped.
 - [ ] Second phone on the verify page, scanner working *(unused until step 4 is approved)*
 - [ ] Dashboard seeded and showing the heatmap
 - [ ] Language preset to Hindi
-- [ ] Audio all loaded (no buffering)
 - [ ] Console clean
 - [ ] Screen recording fallback ready
 - [ ] **Santali answer rehearsed** — don't be asked cold *"where's Santali?"*
