@@ -29,10 +29,12 @@ import clsx from "clsx";
 import type { RoomObject } from "../lib/room";
 import {
   buildProp as buildPropShared,
+  buildScenery,
   kindOf,
   radiusOf,
   type PropKind,
 } from "../lib/ar/prop-shapes";
+import { ROOM, SCENERY, pushOutOfSolids, scenerySolids } from "../lib/environment";
 import {
   ACESFilmicToneMapping,
   AmbientLight,
@@ -45,6 +47,7 @@ import {
   DoubleSide,
   Fog,
   Group,
+  IcosahedronGeometry,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
@@ -64,15 +67,18 @@ import {
 /**
  * Room interior, in metres.
  *
- * This was 22 before, and 22 m is a hall — four objects you must cross a
- * warehouse to reach, and walls too far away to give the room any shape. At 18
- * the equipment reads at a glance, the walls close the space in, and walking
- * between objects is a few steps rather than a trek. The room is still bigger
- * than a real workshop bay, which is what makes walking to the exit meaningful.
+ * Sourced from `lib/environment`, not defined here. The room is data — see the
+ * header of that file for why.
+ *
+ * It has been through three sizes. 22 m read as a hall: four objects you crossed
+ * a warehouse to reach, with walls too far away to give the space any shape. 18 m
+ * fixed the trek but made it a box. 26 x 20 is deliberately *wide and low* — the
+ * equipment reads across the view rather than being stacked up a corridor, and
+ * the room has a horizon, which is what "wide" actually needs.
  */
-const ROOM_W = 18;
-const ROOM_D = 18;
-const WALL_H = 3.9;
+const ROOM_W = ROOM.width;
+const ROOM_D = ROOM.depth;
+const WALL_H = ROOM.height;
 /** Eye height. A person, not a drone. */
 const EYE_H = 1.65;
 const WALK_SPEED = 4.2;
@@ -123,6 +129,33 @@ const WALK_TARGET_STOP = 0.28;
  * about 80.
  */
 const FOV_DEG = 78;
+/**
+ * How far an object's label stays legible, in metres.
+ *
+ * The room is 26 m across and carries a dozen objects. Naming all of them at
+ * every distance turns the view into a wall of overlapping type: the labels
+ * stop describing the room and start hiding it. So a label fades in as the
+ * trainee approaches, which has the useful side effect that walking somewhere
+ * is how you learn what is there. Past `LABEL_FAR` the bay map is what tells
+ * you a thing exists at all.
+ *
+ * The exit is exempt. "Find the nearest exit" must never depend on the trainee
+ * happening to stand close enough for the sign to name itself.
+ */
+const LABEL_NEAR = 13;
+const LABEL_FAR = 22;
+/**
+ * How close to a wall the walker can get.
+ *
+ * One number rather than the three that used to disagree: the tap-to-walk
+ * clamp and the per-frame clamp were different, so a tap near a wall aimed the
+ * trainee at a point the walk loop then refused to reach and the walk gave up
+ * on as stalled.
+ */
+const WALL_MARGIN = 0.7;
+/** Bay map size in CSS pixels. Sized like the reference board's, top-right. */
+const MAP_W = 156;
+const MAP_H = 124;
 
 export type { RoomObject as SceneObject } from "../lib/room";
 
@@ -134,19 +167,25 @@ export type { RoomObject as SceneObject } from "../lib/room";
  * produces the same room, so a re-check is comparable to its training.
  */
 const SLOTS: ReadonlyArray<readonly [number, number, number]> = [
-  // [x, z, facing-radians] in room coordinates.
-  [-9.4, -6.2, Math.PI * 0.5],
-  [-9.4, 0.4, Math.PI * 0.5],
-  [-9.4, 6.6, Math.PI * 0.5],
-  [9.4, -5.0, -Math.PI * 0.5],
-  [9.4, 2.2, -Math.PI * 0.5],
-  [9.4, 8.0, -Math.PI * 0.5],
-  [-5.0, -9.4, 0],
-  [1.6, -9.4, 0],
-  [7.4, -9.4, 0],
-  [-6.4, 9.4, Math.PI],
-  [0.2, 9.4, Math.PI],
-  [6.8, 9.4, Math.PI],
+  // [x, z, facing-radians] in room coordinates, hugging the 26 x 20 shell.
+  // Left wall, facing right.
+  [-ROOM.width / 2 + 0.7, -7.6, Math.PI * 0.5],
+  [-ROOM.width / 2 + 0.7, -2.8, Math.PI * 0.5],
+  [-ROOM.width / 2 + 0.7, 1.8, Math.PI * 0.5],
+  [-ROOM.width / 2 + 0.7, 7.0, Math.PI * 0.5],
+  // Right wall, facing left. The conveyor runs down this side, so the slots
+  // avoid its length rather than overlapping it.
+  [ROOM.width / 2 - 0.7, -8.2, -Math.PI * 0.5],
+  [ROOM.width / 2 - 0.7, 3.4, -Math.PI * 0.5],
+  [ROOM.width / 2 - 0.7, 7.8, -Math.PI * 0.5],
+  // Back wall, facing the trainee.
+  [-9.8, -ROOM.depth / 2 + 0.7, 0],
+  [-1.4, -ROOM.depth / 2 + 0.7, 0],
+  [2.6, -ROOM.depth / 2 + 0.7, 0],
+  // Front wall, behind the trainee at spawn.
+  [-9.8, ROOM.depth / 2 - 0.7, Math.PI],
+  [-3.2, ROOM.depth / 2 - 0.7, Math.PI],
+  [9.8, ROOM.depth / 2 - 0.7, Math.PI],
 ];
 
 /**
@@ -175,9 +214,10 @@ function arcSlot(index: number, count: number): { x: number; z: number; ry: numb
   // The width is not a free choice. Everything on the arc has to fit inside the
   // camera's horizontal field of view from the entry point, or the outermost
   // options are off-screen until the trainee turns — and on a decide step the
-  // whole point is seeing the alternatives side by side. At 3.6 m half-width
-  // the end objects sit at ~38° off centre, which the 76° frustum holds.
-  const half = 3.2;
+  // whole point is seeing the alternatives side by side. At 3.8 m half-width the
+  // end objects sit ~37° off centre including their own radius, which the 78°
+  // frustum holds. Widening past that starts pushing them out of frame.
+  const half = 3.8;
   const x = (t - 0.5) * 2 * half;
   // Bow the edges *away*, so the row curves around the viewer rather than
   // bunching toward them and pushing the ends out of frame.
@@ -301,9 +341,22 @@ export function Scene3D({
   const turnRef = useRef(0);
   // Label nodes, positioned imperatively by the render loop. Keeping them in a
   // ref means a 60 fps room triggers zero React re-renders.
-  const labelNodes = useRef<Array<HTMLDivElement | null>>([]);
+  const labelNodes = useRef<Array<HTMLElement | null>>([]);
+  /**
+   * Where each object actually stands, in room coordinates.
+   *
+   * The label is a button, so it needs the position of the thing it names — and
+   * that position is decided inside the scene-construction effect, by slots the
+   * label markup cannot see. Publishing it here is what lets "tap a name to be
+   * taken there" work without hoisting the whole layout problem into React.
+   */
+  const placesRef = useRef<Array<{ x: number; z: number }>>([]);
+  /** A walk the trainee asked for from a label. Consumed by the walk loop. */
+  const wantWalk = useRef<{ x: number; z: number } | null>(null);
   const crosshairDot = useRef<HTMLDivElement | null>(null);
   const crosshairRing = useRef<HTMLDivElement | null>(null);
+  /** The bay map canvas. Drawn from the same world positions the room is. */
+  const miniRef = useRef<HTMLCanvasElement | null>(null);
 
   // Selection is read through a ref, not a dependency. It used to be a
   // dependency, which meant every tap destroyed and rebuilt the whole scene —
@@ -408,6 +461,17 @@ export function Scene3D({
     /** Canvas textures must be released by hand; the scene traversal below
      *  disposes geometry and materials, but it never sees a texture map. */
     const textures: CanvasTexture[] = [];
+    /**
+     * Geometry built during this effect, released on teardown.
+     *
+     * Declared up here rather than beside the props because the room, the rock
+     * band and the scenery are all built before them, and all three allocate.
+     */
+    const disposables: BufferGeometry[] = [];
+    const keep = (g: BufferGeometry) => {
+      disposables.push(g);
+      return g;
+    };
 
     // -- Room ----------------------------------------------------------------
     //
@@ -415,24 +479,44 @@ export function Scene3D({
     // room was six flat-coloured planes, which is why it read as a grey box: no
     // grain, no seams, and therefore no sense of scale.
     const floorTex = surfaceTexture({
-      base: "#33373d",
-      speckle: "#5a6068",
+      base: "#3a3a38",
+      speckle: "#5f5f5a",
       speckleCount: 5200,
       speckleAlpha: 0.5,
-      joint: "#22262b",
+      joint: "#262624",
       jointEvery: 128,
-      repeat: 6,
+      repeat: 7,
     });
+    // Rock, not painted steel. The reference this room is built from is an
+    // underground mine bay, and the single change that does most of that work is
+    // the wall material: coarse, warm, uneven in colour, with no panel seams.
     const wallTex = surfaceTexture({
-      base: "#3d4550",
-      speckle: "#59626f",
-      speckleCount: 2600,
-      speckleAlpha: 0.35,
-      joint: "#2b323b",
-      jointEvery: 256,
-      repeat: 4,
+      base: "#4a4038",
+      speckle: "#6d6055",
+      speckleCount: 4200,
+      speckleAlpha: 0.55,
+      joint: "#3a322b",
+      jointEvery: 64,
+      repeat: 5,
     });
-    textures.push(floorTex, wallTex);
+    const roofTex = surfaceTexture({
+      base: "#2e2a26",
+      speckle: "#463f39",
+      speckleCount: 1800,
+      speckleAlpha: 0.4,
+      joint: "#241f1c",
+      jointEvery: 512,
+      repeat: 3,
+    });
+    //
+    // Tiling is set per surface, because one `repeat` number is correct for
+    // exactly one plane shape. Both the floor (26 x 20 m) and the walls
+    // (26 x 4.6 m) started at a uniform repeat, which stretched the wall grain
+    // about six-to-one vertically — the fastest way to make a texture read as
+    // wallpaper. These numbers aim for roughly three-metre tiles on each.
+    wallTex.repeat.set(9, 1.6);
+    roofTex.repeat.set(9, 7);
+    textures.push(floorTex, wallTex, roofTex);
 
     const floorMat = new MeshStandardMaterial({
       map: floorTex,
@@ -452,7 +536,10 @@ export function Scene3D({
     floor.receiveShadow = true;
     world.add(floor);
 
-    const ceiling = new Mesh(new PlaneGeometry(ROOM_W, ROOM_D), wallMat);
+    const ceiling = new Mesh(
+      new PlaneGeometry(ROOM_W, ROOM_D),
+      new MeshStandardMaterial({ map: roofTex, roughness: 0.98, side: DoubleSide }),
+    );
     ceiling.rotation.x = Math.PI / 2;
     ceiling.position.y = WALL_H;
     world.add(ceiling);
@@ -501,100 +588,133 @@ export function Scene3D({
       world.add(skirt);
     }
 
-    // Roof beams, across the short axis.
-    const beamGeo = new BoxGeometry(0.26, 0.34, ROOM_D);
-    for (const x of [-4.5, 0, 4.5] as const) {
+    // Roof beams. Spaced across the *wide* axis, which is what gives the ceiling
+    // a sense of span — the same beams on the short axis read as a corridor.
+    const beamGeo = keep(new BoxGeometry(0.26, 0.34, ROOM_D));
+    for (let x = -ROOM_W / 2 + 3; x <= ROOM_W / 2 - 3; x += 5) {
       const beam = new Mesh(beamGeo, steelMat);
       beam.position.set(x, WALL_H - 0.22, 0);
       beam.castShadow = true;
       world.add(beam);
     }
 
-    // A pipe run and cable tray along the far wall.
-    const pipeGeo = new CylinderGeometry(0.13, 0.13, ROOM_W - 0.6, 10);
-    for (const [y, color] of [
-      [WALL_H - 0.55, "#7d6a4a"],
-      [WALL_H - 0.85, "#5c6b7a"],
-    ] as const) {
-      const pipe = new Mesh(
-        pipeGeo,
-        new MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.3 }),
-      );
-      pipe.rotation.z = Math.PI / 2;
-      pipe.position.set(0, y, -ROOM_D / 2 + 0.28);
-      world.add(pipe);
+    // -- Rock ----------------------------------------------------------------
+    // What makes this a mine rather than a warehouse.
+    //
+    // A ring of broken rock along the wall footings, one shared icosahedron and
+    // one shared material so the whole band is a couple of draw calls. Placement
+    // is a deterministic walk along a sine, so the room is the same on every load
+    // — a cold re-check has to be comparable to the training that preceded it,
+    // and that extends to the scenery.
+    const rockGeo = keep(new IcosahedronGeometry(0.8, 0));
+    const rockMat = new MeshStandardMaterial({ color: "#5f574c", roughness: 1 });
+    for (let i = 0; i < 26; i++) {
+      const along = i / 25;
+      const side = i % 2 === 0 ? -1 : 1;
+      const x = (along * 2 - 1) * (ROOM_W / 2 - 1.1);
+      const z = side * (ROOM_D / 2 - 0.9) + Math.sin(i * 2.3) * 0.5;
+      const rock = new Mesh(rockGeo, rockMat);
+      rock.position.set(x, 0.16 + Math.abs(Math.sin(i * 1.7)) * 0.22, z);
+      rock.rotation.set(Math.sin(i * 0.9) * 0.6, i * 1.3, Math.cos(i * 1.1) * 0.4);
+      rock.scale.set(0.7 + Math.abs(Math.sin(i * 0.7)) * 0.9, 0.45, 0.6 + Math.abs(Math.cos(i)) * 0.7);
+      rock.castShadow = true;
+      rock.receiveShadow = true;
+      world.add(rock);
     }
 
-    // Painted walkway down the middle. Safety yellow, worn — and a real scale
-    // reference, which is what a large empty floor is missing most.
+    // A tunnel mouth in the back wall. The room needs somewhere to lead, and
+    // "find the nearest exit" is meaningless in a sealed box.
+    const tunnelMat = new MeshStandardMaterial({ color: "#0b0a09", roughness: 1 });
+    const tunnel = new Mesh(keep(new PlaneGeometry(2.6, 2.5)), tunnelMat);
+    tunnel.position.set(6.4, 1.25, -ROOM_D / 2 + 0.06);
+    world.add(tunnel);
+    const frameMat = new MeshStandardMaterial({ color: "#8a8f96", roughness: 0.6, metalness: 0.4 });
+    for (const [x, y, w, h] of [
+      [6.4, 2.62, 3.0, 0.16],
+      [5.0, 1.25, 0.16, 2.5],
+      [7.8, 1.25, 0.16, 2.5],
+    ] as const) {
+      const part = new Mesh(keep(new BoxGeometry(w, h, 0.2)), frameMat);
+      part.position.set(x, y, -ROOM_D / 2 + 0.12);
+      part.castShadow = true;
+      world.add(part);
+    }
+
+    // Painted walkway, running from the entry to the tunnel mouth. It reads as
+    // "the safe route" and it is the only thing in the room with a direction,
+    // which at this size is what a trainee actually needs to orient by.
     const walkwayMat = new MeshStandardMaterial({
       color: "#8a7326",
       roughness: 0.9,
       transparent: true,
-      opacity: 0.75,
+      opacity: 0.7,
     });
-    for (const x of [-1.15, 1.15] as const) {
-      const stripe = new Mesh(new PlaneGeometry(0.16, ROOM_D - 1.6), walkwayMat);
+    for (const offset of [-1.3, 1.3] as const) {
+      const stripe = new Mesh(keep(new PlaneGeometry(0.16, ROOM_D - 2.4)), walkwayMat);
       stripe.rotation.x = -Math.PI / 2;
-      stripe.position.set(x, 0.012, 0);
+      stripe.position.set(6.4 + offset, 0.012, 0.6);
       world.add(stripe);
     }
 
-    // -- Landmarks -----------------------------------------------------------
-    // Structure, not curriculum. These exist so there is somewhere to walk to
-    // and something to navigate by; they carry no safety verdict and are
-    // deliberately not tappable.
-    const pillarMat = new MeshStandardMaterial({ color: "#4a525d", roughness: 0.8, metalness: 0.2 });
-    const pillarGeo = new CylinderGeometry(0.34, 0.34, WALL_H, 12);
-    for (const [x, z] of [
-      [-5.5, -5.5],
-      [5.5, -5.5],
-      [-5.5, 5.5],
-      [5.5, 5.5],
-    ] as const) {
-      const pillar = new Mesh(pillarGeo, pillarMat);
-      pillar.position.set(x, WALL_H / 2, z);
-      pillar.castShadow = true;
-      pillar.receiveShadow = true;
-      world.add(pillar);
+    // -- Scenery -------------------------------------------------------------
+    //
+    // The equipment of the bay, read from `lib/environment`.
+    //
+    // **None of this is tappable, and none of it is graded.** That is the whole
+    // reason the room can be this full. Scenery is context; the answer surface is
+    // the marker vocabulary, and the two must not be confused — an earlier version
+    // of this room was furnished from ids that existed in no manifest and were
+    // nonetheless wired into grading, so tapping a fire hose reel in a gas module
+    // recorded a gas-safety failure. See the header of `lib/environment.ts`.
+    //
+    // The meshes are deliberately never pushed into `pickable`, so the raycaster
+    // cannot return one and the crosshair cannot light up on it.
+    for (const item of SCENERY) {
+      const group = buildScenery(item.kind, keep);
+      group.position.set(item.x, item.y ?? 0, item.z);
+      group.rotation.y = item.ry;
+      if (item.scale) group.scale.set(item.scale[0], item.scale[1], item.scale[2]);
+      world.add(group);
     }
-
-    const crateMat = new MeshStandardMaterial({ color: "#5b4a35", roughness: 1 });
-    const crateGeo = new BoxGeometry(1.5, 1.1, 1.1);
-    for (const [x, z, ry] of [
-      [-6.8, 2.5, 0.3],
-      [6.8, -3, -0.5],
-      [1.5, -6.8, 0.9],
-    ] as const) {
-      const crate = new Mesh(crateGeo, crateMat);
-      crate.position.set(x, 0.55, z);
-      crate.rotation.y = ry;
-      crate.castShadow = true;
-      crate.receiveShadow = true;
-      world.add(crate);
-    }
+    // Collision comes from the data, already turned into circles — including the
+    // chain of circles that keeps the 17 m conveyor solid along its whole length
+    // rather than only where its centre is. See `scenerySolids`.
+    const scenerySolid = scenerySolids();
 
     // -- Placement -----------------------------------------------------------
     // Props the manifest placed keep their authored position. Everything else
     // takes the next free wall slot, so two objects can never end up inside
-    // each other, or inside a pillar, or stacked in the middle of the floor.
+    // each other, or inside the conveyor, or stacked in the middle of the floor.
     //
     // These are also the collision set: pillars, crates and posts are things
     // you cannot walk through. Without them the trainee slides through solid
     // plant, which makes the room feel like a texture rather than a place.
-    const taken: Array<{ x: number; z: number; r: number }> = [
-      { x: -5.5, z: -5.5, r: 1.0 },
-      { x: 5.5, z: -5.5, r: 1.0 },
-      { x: -5.5, z: 5.5, r: 1.0 },
-      { x: 5.5, z: 5.5, r: 1.0 },
-      { x: -6.8, z: 2.5, r: 1.3 },
-      { x: 6.8, z: -3, r: 1.3 },
-      { x: 1.5, z: -6.8, r: 1.3 },
-    ];
-    // Everything in `taken` is solid, so pillars and crates block the walker
-    // too, not just the props this loop adds.
-    const solid: Array<{ x: number; z: number; r: number }> = taken.map((t) => ({ ...t }));
+    //
+    // Seeded from the scenery, so graded props cannot spawn inside the conveyor
+    // or a boulder. This used to be a hand-copied list of the pillar and crate
+    // positions, which is a duplicate that silently drifts the moment either the
+    // layout or the props move; now there is one source for where things are.
+    const taken: Array<{ x: number; z: number; r: number }> = scenerySolid.map((s) => ({ ...s }));
+    // Scenery blocks the walker too, not just the graded props added below.
+    const solid: Array<{ x: number; z: number; r: number }> = scenerySolid.map((s) => ({ ...s }));
     let slotCursor = 0;
+
+    /**
+     * Push a point out of the plant, then back inside the walls.
+     *
+     * The geometry is in `lib/environment` so a test can check it; the wall
+     * clamp belongs here, because how close to a wall a thing may stand is a
+     * property of the walker rather than of the room's contents.
+     */
+    const pushOut = (x: number, z: number, radius: number) => {
+      const moved = pushOutOfSolids(x, z, radius, solid);
+      const halfW = ROOM_W / 2 - WALL_MARGIN;
+      const halfD = ROOM_D / 2 - WALL_MARGIN;
+      return {
+        x: Math.max(-halfW, Math.min(halfW, moved.x)),
+        z: Math.max(-halfD, Math.min(halfD, moved.z)),
+      };
+    };
 
     /** Next wall slot with clearance, or a wall-edge fallback if all are full. */
     const claimSlot = (radius: number) => {
@@ -621,7 +741,6 @@ export function Scene3D({
     // -- Targets -------------------------------------------------------------
     const hit = new Raycaster();
     const pickable: Mesh[] = [];
-    const disposables: BufferGeometry[] = [];
     // Mesh -> manifest id. A side table rather than `userData`, which would
     // need a cast on every read and would fight the library's own typing.
     const idOf = new Map<Mesh, string>();
@@ -632,11 +751,8 @@ export function Scene3D({
     // when it is neither aimed at nor already answered.
     const resting = new Map<string, string>();
     const anchors: Array<{ at: Vector3 }> = [];
-
-    const keep = (g: BufferGeometry) => {
-      disposables.push(g);
-      return g;
-    };
+    /** Where each object stands, for the label buttons. */
+    const places: Array<{ x: number; z: number }> = [];
 
     /**
      * The shapes come from `lib/ar/prop-shapes`, which the camera AR view also
@@ -661,8 +777,13 @@ export function Scene3D({
         ry = slot.ry;
         taken.push({ x: px, z: pz, r: radius });
       } else if (object.authored) {
-        px = (object.x - 0.5) * (ROOM_W - 3);
-        pz = (0.5 - object.y) * (ROOM_D - 3);
+        const placed = pushOut(
+          (object.x - 0.5) * (ROOM_W - 3),
+          (0.5 - object.y) * (ROOM_D - 3),
+          radius,
+        );
+        px = placed.x;
+        pz = placed.z;
         // Face the middle of the room, so an authored sign is never edge-on.
         ry = Math.atan2(-px, -pz);
         taken.push({ x: px, z: pz, r: radius });
@@ -735,7 +856,9 @@ export function Scene3D({
       }
 
       anchors.push({ at: new Vector3(px, anchorY, pz) });
+      places[index] = { x: px, z: pz };
     }
+    placesRef.current = places;
 
     // -- Sizing --------------------------------------------------------------
     const resize = () => {
@@ -751,7 +874,31 @@ export function Scene3D({
 
     // -- Travel --------------------------------------------------------------
     const keys = new Set<string>();
-    const onKeyDown = (e: KeyboardEvent) => keys.add(e.key.toLowerCase());
+    /**
+     * Is this keystroke someone typing rather than someone steering?
+     *
+     * The listeners are on `window`, because a canvas is not a focus target a
+     * trainee should have to find. That means every keystroke anywhere on the
+     * page reached them — so spelling a word into a form field walked the
+     * trainee across the room, one `w` at a time.
+     */
+    const isTyping = (target: EventTarget | null): boolean => {
+      const el = target as HTMLElement | null;
+      if (!el || typeof el.tagName !== "string") return false;
+      const tag = el.tagName.toLowerCase();
+      return tag === "input" || tag === "textarea" || tag === "select" || el.isContentEditable;
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isTyping(e.target)) return;
+      // Modified keys are the browser's: `w` is forward, `cmd-w` is a closed
+      // tab, and swallowing it would be a bug you only notice once.
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const key = e.key.toLowerCase();
+      // Arrow keys scroll the document by default, so walking with them also
+      // scrolled the page out from under the room.
+      if (key.startsWith("arrow")) e.preventDefault();
+      keys.add(key);
+    };
     const onKeyUp = (e: KeyboardEvent) => keys.delete(e.key.toLowerCase());
     // A keyup that never arrives — alt-tab mid-stride, a lock screen, a phone
     // call — used to leave the trainee walking into a wall indefinitely.
@@ -856,12 +1003,14 @@ export function Scene3D({
       // do at it, not about holding a key down to steer.
       const ground = hit.ray.intersectPlane(floorPlane, new Vector3());
       if (ground) {
-        const limit = ROOM_W / 2 - BODY_R - 0.4;
-        walkTo = new Vector3(
-          Math.max(-limit, Math.min(limit, ground.x)),
-          0,
-          Math.max(-limit, Math.min(limit, ground.z)),
-        );
+        // Clamped to the same margin the walk loop clamps to. When the two
+        // disagreed, a tap close to a wall set a target the walker could never
+        // stand on, and the walk abandoned itself as stalled. The aim point is
+        // also pulled a body-radius off the wall, so tapping the floor where you
+        // are standing does not walk you into it.
+        const cx = Math.max(-(ROOM_W / 2 - WALL_MARGIN - BODY_R), Math.min(ROOM_W / 2 - WALL_MARGIN - BODY_R, ground.x));
+        const cz = Math.max(-(ROOM_D / 2 - WALL_MARGIN - BODY_R), Math.min(ROOM_D / 2 - WALL_MARGIN - BODY_R, ground.z));
+        walkTo = new Vector3(cx, 0, cz);
         walkLastD = Infinity;
         walkStall = 0;
       }
@@ -880,6 +1029,145 @@ export function Scene3D({
     const centre = new Vector2(0, 0);
     const projected = new Vector3();
     let frame = 0;
+    let miniTick = 0;
+    let mapSized = false;
+
+    /**
+     * The bay map.
+     *
+     * A 26 x 20 m room is big enough to get turned around in, and "which way is
+     * the tunnel" is a safety question rather than a nicety — the reference
+     * board carries a minimap for the same reason. It is drawn from the same
+     * world positions the room is built from, so it cannot disagree with what
+     * the trainee is looking at; it is not a hand-drawn diagram that drifts.
+     *
+     * Up on the map is the far wall, where the tunnel is, and the trainee is the
+     * wedge, so the map answers "which way am I facing" as well as "where am
+     * I". Drawn at devicePixelRatio so it is not soft on a phone.
+     */
+    const drawMap = () => {
+      const canvas = miniRef.current;
+      if (!canvas) return;
+      if (!mapSized) {
+        const dpr = Math.min(window.devicePixelRatio, 2);
+        canvas.width = Math.round(MAP_W * dpr);
+        canvas.height = Math.round(MAP_H * dpr);
+        const setup = canvas.getContext("2d");
+        setup?.setTransform(dpr, 0, 0, dpr, 0, 0);
+        mapSized = true;
+      }
+      const g = canvas.getContext("2d");
+      if (!g) return;
+
+      const s = Math.min((MAP_W - 14) / ROOM_W, (MAP_H - 16) / ROOM_D);
+      const ox = (MAP_W - ROOM_W * s) / 2;
+      const oy = (MAP_H - ROOM_D * s) / 2 + 2;
+      const mx = (x: number) => ox + (x + ROOM_W / 2) * s;
+      const my = (z: number) => oy + (z + ROOM_D / 2) * s;
+
+      g.clearRect(0, 0, MAP_W, MAP_H);
+      g.fillStyle = "rgba(11,15,21,0.78)";
+      g.fillRect(ox, oy, ROOM_W * s, ROOM_D * s);
+      g.strokeStyle = "rgba(148,163,184,0.4)";
+      g.lineWidth = 1;
+      g.strokeRect(ox, oy, ROOM_W * s, ROOM_D * s);
+
+      // The tunnel, drawn as a stub through the far wall: somewhere to go, and
+      // the one fixed point the whole map can be read against.
+      g.strokeStyle = "rgba(74,222,128,0.85)";
+      g.lineWidth = 2;
+      g.beginPath();
+      g.moveTo(mx(5.0), oy);
+      g.lineTo(mx(7.8), oy);
+      g.stroke();
+      g.beginPath();
+      g.moveTo(mx(6.4), oy);
+      g.lineTo(mx(6.4), oy - 6);
+      g.stroke();
+      g.fillStyle = "rgba(74,222,128,0.85)";
+      g.font = "600 7px ui-monospace, monospace";
+      g.fillText("EXIT", mx(5.2), oy - 8.5);
+
+      // The painted walkway. It is the only thing in the room with a direction,
+      // which at this size is what a trainee actually orients by.
+      g.strokeStyle = "rgba(138,115,38,0.55)";
+      g.lineWidth = 1;
+      for (const offset of [-1.3, 1.3]) {
+        g.beginPath();
+        g.moveTo(mx(6.4 + offset), oy + 5);
+        g.lineTo(mx(6.4 + offset), my(ROOM_D / 2 - 1.2));
+        g.stroke();
+      }
+
+      // Scenery, faint. It is context for the graded objects rather than a
+      // landmark in its own right, but the conveyor run down the right-hand
+      // side is what makes the map match the room you are standing in.
+      for (const item of SCENERY) {
+        if (item.kind === "pipe-run") continue;
+        const px = mx(item.x);
+        const pz = my(item.z);
+        if (item.kind === "conveyor") {
+          const half = 6 * (item.scale?.[2] ?? 1) * s;
+          g.strokeStyle = "rgba(201,162,39,0.8)";
+          g.lineWidth = 3;
+          g.beginPath();
+          g.moveTo(px, pz - half);
+          g.lineTo(px, pz + half);
+          g.stroke();
+          continue;
+        }
+        g.fillStyle = "rgba(148,163,184,0.32)";
+        g.fillRect(px - 1.5, pz - 1.5, 3, 3);
+      }
+
+      // The answers. Same colour language as the room: green for the exit,
+      // amber for something you can select, dim for equipment you can only find.
+      for (let i = 0; i < anchors.length; i++) {
+        const anchor = anchors[i];
+        const object = objects[i];
+        if (!anchor || !object) continue;
+        const px = mx(anchor.at.x);
+        const pz = my(anchor.at.z);
+        const done = object.done || object.id === selectedRef.current;
+        g.beginPath();
+        g.arc(px, pz, object.isExit ? 3.4 : 2.6, 0, Math.PI * 2);
+        g.fillStyle = object.isExit
+          ? "#4ade80"
+          : done
+            ? "#facc15"
+            : object.role === "interactable"
+              ? "#fbbf24"
+              : "rgba(226,232,240,0.6)";
+        g.fill();
+        if (object.isExit) {
+          g.strokeStyle = "rgba(74,222,128,0.45)";
+          g.lineWidth = 4;
+          g.stroke();
+        }
+      }
+
+      // The trainee: a view cone, so facing is readable at a glance, with the
+      // wedge over it marking exactly where you stand.
+      const px = mx(camera.position.x);
+      const pz = my(camera.position.z);
+      const ax = -Math.sin(yaw);
+      const az = -Math.cos(yaw);
+      const heading = Math.atan2(az, ax);
+      g.beginPath();
+      g.moveTo(px, pz);
+      g.arc(px, pz, 24, heading - 0.55, heading + 0.55);
+      g.closePath();
+      g.fillStyle = "rgba(226,232,240,0.12)";
+      g.fill();
+
+      g.beginPath();
+      g.moveTo(px + ax * 6, pz + az * 6);
+      g.lineTo(px - az * 3.2 - ax * 1.6, pz + ax * 3.2 - az * 1.6);
+      g.lineTo(px + az * 3.2 - ax * 1.6, pz - ax * 3.2 - az * 1.6);
+      g.closePath();
+      g.fillStyle = "#e2e8f0";
+      g.fill();
+    };
 
     const tick = () => {
       frame = requestAnimationFrame(tick);
@@ -911,6 +1199,16 @@ export function Scene3D({
         mx += padRef.current.x;
         mz -= padRef.current.y;
       }
+      // A label was tapped: walk to the thing it names. This is the coarse
+      // control the wide room needs — judging where a spot on the floor is, in
+      // three dimensions, at 20 m, is a skill the exercise is not testing.
+      if (wantWalk.current) {
+        walkTo = new Vector3(wantWalk.current.x, 0, wantWalk.current.z);
+        walkLastD = Infinity;
+        walkStall = 0;
+        wantWalk.current = null;
+      }
+
       // Two movement sources: what the trainee is holding, and where they
       // tapped. Holding something wins and cancels the walk, because a person
       // who starts steering has changed their mind about the destination.
@@ -941,8 +1239,8 @@ export function Scene3D({
         camera.position.z += stepZ;
 
         // Walls. A clamp is enough for a rectangular room and costs nothing.
-        const halfW = ROOM_W / 2 - 0.7;
-        const halfD = ROOM_D / 2 - 0.7;
+        const halfW = ROOM_W / 2 - WALL_MARGIN;
+        const halfD = ROOM_D / 2 - WALL_MARGIN;
         camera.position.x = Math.max(-halfW, Math.min(halfW, camera.position.x));
         camera.position.z = Math.max(-halfD, Math.min(halfD, camera.position.z));
 
@@ -1011,15 +1309,31 @@ export function Scene3D({
         const anchor = anchors[i];
         if (!node || !anchor) continue;
         projected.copy(anchor.at).project(camera);
+        // z > 1 is behind the camera. Three.js has already mirrored those into
+        // the frame, so without this a label for the thing behind you renders
+        // on top of the thing in front of you.
         if (projected.z > 1) {
           node.style.opacity = "0";
           continue;
         }
         const x = (projected.x * 0.5 + 0.5) * w;
         const y = (-projected.y * 0.5 + 0.5) * h;
-        node.style.opacity = "1";
+
+        // Distance fade. Names in the room you are standing in, and lets the
+        // bay map handle the far end — see LABEL_NEAR/LABEL_FAR.
+        const distance = camera.position.distanceTo(anchor.at);
+        const alpha =
+          objects[i]?.isExit || distance <= LABEL_NEAR
+            ? 1
+            : Math.max(0, (LABEL_FAR - distance) / (LABEL_FAR - LABEL_NEAR));
+        node.style.opacity = alpha.toFixed(2);
         node.style.transform = `translate(-50%, -100%) translate(${x.toFixed(1)}px, ${(y - 6).toFixed(1)}px)`;
       }
+
+      // The bay map is redrawn every other frame. It has nothing to do with the
+      // camera update, so 30 Hz is indistinguishable from 60 and halves the
+      // 2D canvas work this surface does.
+      if (miniTick++ % 2 === 0) drawMap();
 
       renderer.render(scene, camera);
     };
@@ -1077,16 +1391,44 @@ export function Scene3D({
         style={{ transform: "translate(-50%, -50%)" }}
       />
 
+      {/* The bay map. Top-right, like the reference board's. It is drawn from
+          the room's own world coordinates each frame, so it can never disagree
+          with what the trainee is standing in front of — and it is the only
+          thing that answers "where is the tunnel" from across 26 m. */}
+      <div className="pointer-events-none absolute right-2 top-2 origin-top-right scale-[0.78] rounded-lg border border-fog-700/40 bg-ink-950/80 p-1.5 backdrop-blur-sm sm:right-3 sm:top-3 sm:scale-100">
+        <p className="px-0.5 pb-1 font-mono text-[9px] uppercase tracking-widest text-fog-500">
+          bay map
+        </p>
+        <canvas
+          ref={miniRef}
+          aria-hidden="true"
+          className="block"
+          style={{ width: MAP_W, height: MAP_H }}
+        />
+        <p className="flex items-center gap-1 px-0.5 pt-1 font-mono text-[9px] uppercase tracking-wider text-fog-600">
+          <span className="h-1.5 w-1.5 rounded-full bg-fog-300" />
+          you are here
+        </p>
+      </div>
+
       {/* Object labels. DOM, not canvas — docs/05 §5. Screen position is driven
           imperatively by the render loop. */}
       {objects.map((o, i) => (
-        <div
+        <button
           key={o.id}
+          type="button"
           ref={(n) => {
             labelNodes.current[i] = n;
           }}
+          // A label is how you travel. It is also why these are buttons and not
+          // decorated divs: a name you can tab to and press is the same control
+          // for a keyboard as for a thumb.
+          onClick={() => {
+            wantWalk.current = placesRef.current[i] ?? null;
+          }}
+          title={`Walk to ${o.label}`}
           className={clsx(
-            "pointer-events-none absolute left-0 top-0 flex items-center gap-1.5 whitespace-nowrap rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider",
+            "absolute left-0 top-0 flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider",
             o.isExit
               ? "bg-go-500/20 text-go-300"
               : o.role === "interactable"
@@ -1102,7 +1444,7 @@ export function Scene3D({
             <span className="opacity-70 tabular-nums">{o.order}</span>
           )}
           {o.label}
-        </div>
+        </button>
       ))}
 
       {/* Thumb pad, for a phone held in one hand. Hidden where there is a
@@ -1141,7 +1483,7 @@ export function Scene3D({
       </div>
 
       <p className="pointer-events-none absolute bottom-4 right-4 hidden rounded-md bg-ink-950/70 px-2.5 py-1.5 text-right font-mono text-[10px] uppercase tracking-wider text-fog-500 lg:block">
-        tap the floor to walk · tap an object to answer · drag to look · q / e to turn
+        tap the floor to walk · tap an object to answer · drag to look · w a s d to walk · q / e to turn
       </p>
     </div>
   );

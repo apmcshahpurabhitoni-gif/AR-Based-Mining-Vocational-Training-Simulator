@@ -398,7 +398,7 @@ export function Training({ manifest: manifestProp, phase = "training", sample, o
       {/* -- Scene ------------------------------------------------------- */}
       <div className="panel overflow-hidden">
         {showAR ? (
-          <div className="relative h-72 sm:h-96">
+          <div className="relative h-[62vh] min-h-[24rem] max-h-[46rem]">
             <Suspense
               fallback={
                 <div className="grid h-full place-items-center font-mono text-[11px] uppercase tracking-widest text-fog-700">
@@ -418,7 +418,7 @@ export function Training({ manifest: manifestProp, phase = "training", sample, o
             </Suspense>
           </div>
         ) : walk3d ? (
-          <div className="relative h-72 sm:h-96">
+          <div className="relative h-[62vh] min-h-[24rem] max-h-[46rem]">
             <Suspense
               fallback={
                 <div className="grid h-full place-items-center font-mono text-[11px] uppercase tracking-widest text-fog-700">
