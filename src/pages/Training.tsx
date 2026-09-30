@@ -66,6 +66,7 @@ const ARView = lazy(() =>
   import("../lib/ar/SceneAR").then((m) => ({ default: m.SceneAR })),
 );
 import { useSession, useT } from "../lib/session";
+import { localise } from "../lib/i18n";
 import { Button, Chip } from "../components/ui";
 import {
   createRunnerState,
@@ -1073,11 +1074,6 @@ function Feedback({
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function localise(value: Localised, locale: "en" | "hi" | "sat"): string {
-  if (locale === "sat") return value.sat ?? value.en;
-  return value[locale] || value.en;
-}
 
 /**
  * The AR-mode feature flag, surfaced.

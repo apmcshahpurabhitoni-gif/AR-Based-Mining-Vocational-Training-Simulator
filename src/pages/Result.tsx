@@ -23,14 +23,17 @@ import {
 } from "lucide-react";
 import { useSession, useT } from "../lib/session";
 import { Button, Chip, LinkButton, Meter, Panel } from "../components/ui";
+import { LocalAssessmentPanel } from "../components/LocalAssessment";
 import { GateStrip } from "./Dashboard";
 import { bundledManifests, fetchAssessment, fetchRecheckStatus, issueCertificate } from "../lib/api";
-import type { GateResult, ModuleScore } from "../lib/types";
+import { localEventsByModule } from "../lib/db";
+import { localAssessment, modulesAwaitingServer } from "../lib/local-assessment";
+import type { AttemptEvent, GateResult, ModuleScore } from "../lib/types";
 import { GATE_THRESHOLDS } from "../lib/gate";
 
 export function Result() {
   const t = useT();
-  const { token } = useSession();
+  const { token, locale } = useSession();
   const [params] = useSearchParams();
   const wasRecheck = params.get("recheck") === "1";
 
@@ -41,6 +44,44 @@ export function Result() {
   const [issuedCode, setIssuedCode] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [issuing, setIssuing] = useState(false);
+
+  /**
+   * The device's own record of what just happened.
+   *
+   * Loaded independently of the network, and deliberately NOT conditional on
+   * having a token: the whole point is the offline run, and gating this on a
+   * successful server call would mean it is empty exactly when it is needed.
+   */
+  const [local, setLocal] = useState<Map<string, AttemptEvent[]> | null>(null);
+  useEffect(() => {
+    let live = true;
+    void localEventsByModule()
+      .then((events) => {
+        if (live) setLocal(events);
+      })
+      .catch(() => {
+        if (live) setLocal(new Map());
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const localReport = useMemo(
+    () => (local ? localAssessment(manifests, local) : null),
+    [local, manifests],
+  );
+
+  /*
+   * Only shown when the server's figure and the device's differ, i.e. when the
+   * device holds a run the server has not counted. When they agree there is
+   * nothing to add: two copies of the same number is not information, and a
+   * second score on screen is one more thing to read.
+   */
+  const awaiting = useMemo(
+    () => (localReport ? modulesAwaitingServer(localReport, scores) : []),
+    [localReport, scores],
+  );
 
   const load = useCallback(async () => {
     if (!token) {
@@ -89,16 +130,33 @@ export function Result() {
   }
 
   if (!gate) {
+    /*
+     * No server verdict.
+     *
+     * This is the offline case, and it used to be a dead end: "results are not
+     * available yet, reconnect if you trained offline" — true, and useless to
+     * someone who just worked a shift underground and cannot find out whether
+     * it went well. The local assessment leads instead, and the server's
+     * absence is stated above it rather than used as an excuse to show nothing.
+     */
     return (
-      <Panel>
-        <p className="text-fog-400">
-          Results are not available yet. They are computed on the server from your recorded
-          attempts — reconnect if you trained offline.
-        </p>
-        <LinkButton to="/dashboard" className="mt-5">
-          {t("result.backToDashboard")}
-        </LinkButton>
-      </Panel>
+      <div className="space-y-6">
+        <Panel className="border-ink-600">
+          <p className="text-fog-300">
+            {t("result.localVerdictPending")}
+          </p>
+          {localReport && localReport.modules.length > 0 && (
+            <p className="mt-2 text-sm leading-relaxed text-fog-500">
+              {t("result.localBelow")}
+            </p>
+          )}
+          <LinkButton to="/dashboard" className="mt-5" variant="secondary">
+            {t("result.backToDashboard")}
+          </LinkButton>
+        </Panel>
+
+        {localReport && <LocalAssessmentPanel report={localReport} locale={locale} />}
+      </div>
     );
   }
 
@@ -140,6 +198,21 @@ export function Result() {
           </div>
         </div>
       </Panel>
+
+      {/* -- The device's own copy, underneath the server's ---------------- */}
+      {/*
+       * Shown when there is a server verdict AND the device holds a run the
+       * server has not seen — a run just finished offline, or one still
+       * queued. The two numbers are computed by the same function over the
+       * same rows, so when they differ it is because the events have not
+       * arrived, not because the device disagrees with the server. That is
+       * worth showing rather than hiding until sync, because "my score moved
+       * and I don't know why" is exactly the thing that makes people stop
+       * trusting a score.
+       */}
+      {localReport && localReport.modules.length > 0 && awaiting.length > 0 && (
+        <LocalAssessmentPanel report={localReport} locale={locale} awaitingServer={awaiting} />
+      )}
 
       {/* -- Module scores ------------------------------------------------ */}
       <div className="grid gap-4 sm:grid-cols-2">

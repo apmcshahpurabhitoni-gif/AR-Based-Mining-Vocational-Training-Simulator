@@ -58,6 +58,31 @@ export const ROOM = {
 } as const;
 
 /**
+ * Boulders in the ring at the foot of the walls.
+ *
+ * In the data layer rather than as a loop bound in the renderer, because it is
+ * both a look and a budget: the ring is drawn as a single `InstancedMesh`, so
+ * this number is how many instances the GPU is handed, and a test asserts the
+ * room's total draw-call estimate stays inside what a mid-range phone can
+ * afford. A reviewer adding a rock should see that cost, not discover it.
+ */
+export const ROCK_RING_COUNT = 26;
+
+/**
+ * The two fixed features the room is read against: where the trainee comes in,
+ * and where the tunnel out is.
+ *
+ * Both were literals in three places — the camera spawn, the painted routes and
+ * the bay map — which is how a route ends up pointing at a wall because
+ * somebody moved the tunnel. They live here so the paint, the map and the spawn
+ * framing are all reading the same two numbers.
+ */
+export const ENTRY = { x: 0, z: ROOM.depth / 2 - 1.2 } as const;
+
+/** Centre of the tunnel mouth, on the back wall. */
+export const EXIT_MOUTH = { x: 6.4, z: -ROOM.depth / 2 + 0.8 } as const;
+
+/**
  * Shape families. Each maps to a builder in `prop-shapes.ts`.
  *
  * `kind` is a closed union, so a typo in the table below is a compile error
@@ -76,7 +101,21 @@ export type SceneryKind =
   | "toolboard"
   | "crate"
   | "rock"
-  | "pipe-run";
+  | "pipe-run"
+  // -- docs/16 phase 3: what the design board names and the room was missing --
+  //
+  // All inert, all scenery. `assembly-point` and `refuge-chamber` are real
+  // marker ids that a step can be answered with, so the scenery beside them is
+  // named `assembly-yard` and `refuge-alcove` instead — a test fails the build
+  // if a scenery id ever matches something gradable, and that test is the whole
+  // reason this file can be rich.
+  | "assembly-yard"
+  | "refuge-alcove"
+  | "generator-cage"
+  | "gas-rack"
+  | "monitor"
+  | "whiteboard"
+  | "chair";
 
 export interface SceneryItem {
   /** Stable id. Used by tests and for debugging, never shown to a trainee. */
@@ -91,6 +130,16 @@ export interface SceneryItem {
   y?: number;
   /** Non-uniform scale, for stretching a shape to fit a wall. */
   scale?: readonly [number, number, number];
+  /**
+   * A name a trainee can navigate by, shown in the Find-and-Learn panel and on
+   * the bay map.
+   *
+   * Set only on the handful of pieces with a silhouette you would remember from
+   * the doorway. A landmark is a *noun* — "conveyor run", "dust extractor" — and
+   * never a sentence: what the thing is for, and when to use it, is safety copy
+   * that belongs to R9, not to a renderer.
+   */
+  landmark?: string;
 }
 
 /** Wall insets. Equipment mounts on a wall, so it sits just inside it. */
@@ -152,6 +201,42 @@ export const SCENERY: readonly SceneryItem[] = [
 
   // -- Services overhead ------------------------------------------------------
   { id: "pipe-main", kind: "pipe-run", x: 0, z: B + 0.5, ry: 0, y: ROOM.height - 0.55 },
+
+  // -- Phase 3: the locations the design board names and the room did not have --
+  //
+  // Nine of the board's fourteen locations were already here. These are the
+  // missing ones, placed against what is already on the floor so the aisle a
+  // painted route follows stays walkable — a refuge chamber you cannot walk up
+  // to is a picture, not a place.
+  {
+    id: "assembly-yard",
+    kind: "assembly-yard",
+    x: 9.6,
+    z: -8.4,
+    ry: 0,
+    landmark: "assembly point",
+  },
+  {
+    id: "refuge-alcove",
+    kind: "refuge-alcove",
+    x: -11.8,
+    z: 2.0,
+    ry: Math.PI * 0.5,
+    landmark: "refuge chamber",
+  },
+  { id: "generator-cage", kind: "generator-cage", x: -6.0, z: -8.0, ry: -0.3, landmark: "generator cage" },
+  { id: "gas-rack", kind: "gas-rack", x: 8.4, z: 2.0, ry: Math.PI, landmark: "cylinder rack" },
+
+  // The control and training area. The bench was already here; what was missing
+  // is the wall the training happens against. Both hang above walking height, so
+  // neither claims floor.
+  { id: "monitor-left", kind: "monitor", x: L, z: 6.4, ry: Math.PI * 0.5, y: 1.9, landmark: "wall monitor" },
+  { id: "whiteboard-left", kind: "whiteboard", x: L, z: 0.0, ry: Math.PI * 0.5, y: 1.7 },
+
+  // Density. The reference room has chairs at the bench, and a training bay
+  // with a bench and nothing to sit on reads as a storage room.
+  { id: "chair-a", kind: "chair", x: -5.0, z: 4.6, ry: -0.5 },
+  { id: "chair-b", kind: "chair", x: -8.2, z: 1.4, ry: 0.4 },
 ] as const;
 
 /**
@@ -194,6 +279,16 @@ export const SCENERY_FOOTPRINT: Readonly<
   rock: { r: 1.5 },
   estop: { r: 0.5 },
   switchboard: { r: 0.9 },
+  // Phase 3. The refuge chamber and the assembly square are the two that matter
+  // here: both are things a trainee is meant to *reach*, so both are given a
+  // body a person can stand in front of rather than being wall dressing.
+  "assembly-yard": { r: 1.2 },
+  "refuge-alcove": { r: 1.6 },
+  "generator-cage": { r: 1.3 },
+  "gas-rack": { r: 0.9 },
+  chair: { r: 0.4 },
+  // `monitor` and `whiteboard` are deliberately absent, like `extractor`: they
+  // hang on a wall and the walker passes underneath them.
 };
 
 /** A circle of floor the walker cannot enter. */

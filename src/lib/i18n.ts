@@ -15,6 +15,8 @@ import type { Localised, Locale } from "./types";
 export type UiKey =
   | "app.name"
   | "app.tagline"
+  | "app.buildNotice"
+  | "app.buildNotice.detail"
   | "nav.dashboard"
   | "nav.admin"
   | "nav.certificate"
@@ -84,6 +86,22 @@ export type UiKey =
   | "result.recheckRequired"
   | "result.takeRecheck"
   | "result.backToDashboard"
+  | "result.localVerdictPending"
+  | "result.localBelow"
+  | "local.title"
+  | "local.badge"
+  | "local.notAVerdict"
+  | "local.passMark"
+  | "local.criticalMisses"
+  | "local.criticalMissNote"
+  | "local.blockedFailures"
+  | "local.stepsReached"
+  | "local.complete"
+  | "local.incomplete"
+  | "local.pendingReview"
+  | "local.unknownTitle"
+  | "local.offlineRecorded"
+  | "local.recheckHint"
   | "recheck.title"
   | "recheck.subtitle"
   | "recheck.sampleNotice"
@@ -144,6 +162,27 @@ export const UI: Strings = {
   "app.tagline": {
     en: "Safety training that remembers",
     hi: "सुरक्षा प्रशिक्षण जो याद रखता है",
+  },
+  /*
+   * The build status, said plainly and in both languages.
+   *
+   * Not decoration. This build is pre-release and it is being handed to people
+   * outside the team, including on a phone, where a certificate-looking app with
+   * no status line is indistinguishable from a finished one. The strip is
+   * permanent and not dismissible for the same reason the hazard tape above it
+   * is: a warning a trainee can swipe away is a warning that will be swiped
+   * away before the assessment that depends on it.
+   *
+   * It says "may not work", not "is unsafe". Those are different claims, and
+   * only the first one is true.
+   */
+  "app.buildNotice": {
+    en: "Pre-release build · under active development · some features may not work",
+    hi: "प्री-रिलीज़ बिल्ड · लगातार विकास जारी · कुछ सुविधाएँ ठीक से नहीं चलेंगी",
+  },
+  "app.buildNotice.detail": {
+    en: "This is a working build, not a finished product. If something breaks, that is the build's fault, not yours — tell the safety team what you were doing. Nothing here is a certificate.",
+    hi: "यह एक कार्यशील बिल्ड है, तैयार उत्पाद नहीं। कुछ टूटे तो इसकी गलती है, आपकी नहीं — सुरक्षा दल को बताएँ कि आप क्या कर रहे थे। यहाँ कुछ भी प्रमाणपत्र नहीं है।",
   },
 
   "nav.dashboard": { en: "Training", hi: "प्रशिक्षण" },
@@ -279,6 +318,56 @@ export const UI: Strings = {
   },
   "result.takeRecheck": { en: "Take the cold re-check", hi: "शीत पुनःपरीक्षण दें" },
   "result.backToDashboard": { en: "Back to training", hi: "प्रशिक्षण पर वापस" },
+  "result.localVerdictPending": {
+    en: "The official result is not in yet. It is decided on the server from your recorded attempts, and nothing on this device can stand in for it.",
+    hi: "आधिकारिक परिणाम अभी नहीं आया है। यह सर्वर पर आपके दर्ज प्रयासों से तय होता है, और इस डिवाइस पर कुछ भी इसकी जगह नहीं ले सकता।",
+  },
+  "result.localBelow": {
+    en: "What you did is recorded on this device, and it is below.",
+    hi: "आपने जो किया वह इस डिवाइस पर दर्ज है, और वह नीचे दिया गया है।",
+  },
+
+  /**
+   * Local assessment panel.
+   *
+   * This is the one place in the product that shows a number without a gate
+   * behind it, so the wording does the safety work the code deliberately
+   * refuses to do. Every label says what the figure IS, and the panel names
+   * the three things it cannot know — in the trainee's own language, because
+   * a disclosure in a language the reader cannot read is not a disclosure.
+   */
+  "local.title": { en: "Your record from this device", hi: "इस डिवाइस पर आपका रिकॉर्ड" },
+  "local.badge": { en: "Local — not certified", hi: "स्थानीय — प्रमाणित नहीं" },
+  "local.notAVerdict": {
+    en: "This is what you did on this device. It is not a certificate decision, and it cannot become one.",
+    hi: "यह है कि आपने इस डिवाइस पर क्या किया। यह प्रमाणपत्र का निर्णय नहीं है, और यह निर्णय बन भी नहीं सकता।",
+  },
+  "local.passMark": { en: "Module pass mark", hi: "मॉड्यूल उत्तीर्ण अंक" },
+  "local.criticalMisses": { en: "Critical first-try misses", hi: "गंभीर चरणों पर पहली बार की गलतियाँ" },
+  "local.criticalMissNote": {
+    en: "A first-try miss on a critical step is recorded permanently. It cannot be cleared by retaking the module.",
+    hi: "किसी गंभीर चरण पर पहली बार की गलती स्थायी रूप से दर्ज होती है। मॉड्यूल दोबारा करने से यह मिट नहीं सकती।",
+  },
+  "local.blockedFailures": { en: "Certificate-blocking failures", hi: "प्रमाणपत्र रोकने वाली विफलताएँ" },
+  "local.stepsReached": { en: "Steps completed", hi: "पूरे किए गए चरण" },
+  "local.complete": { en: "Every step answered", hi: "हर चरण का उत्तर दिया" },
+  "local.incomplete": {
+    en: "Not finished — a step you never reached is counted as not done, never as passed.",
+    hi: "अधूरा — जिस चरण पर आप नहीं पहुँचे, वह पूरा नहीं माना जाता, कभी सही नहीं माना जाता।",
+  },
+  "local.pendingReview": {
+    en: "This module has a step waiting for the qualified safety reviewer, so it cannot be completed or certified — whatever this score says.",
+    hi: "इस मॉड्यूल का एक चरण योग्य सुरक्षा समीक्षक के पास है, इसलिए यह पूरा या प्रमाणित नहीं हो सकता — यह स्कोर जो भी हो।",
+  },
+  "local.unknownTitle": { en: "What this cannot tell you", hi: "यह आपको क्या नहीं बता सकता" },
+  "local.offlineRecorded": {
+    en: "Recorded with the network off. Synced to the server for the official record.",
+    hi: "नेटवर्क बंद होने पर दर्ज किया गया। आधिकारिक रिकॉर्ड के लिए सर्वर पर सिंक किया गया।",
+  },
+  "local.recheckHint": {
+    en: "The certificate also needs a cold re-check later, and that is only ever decided on the server.",
+    hi: "प्रमाणपत्र के लिए बाद में एक शीत पुनःपरीक्षण भी चाहिए, और वह केवल सर्वर पर ही तय होता है।",
+  },
 
   "recheck.title": { en: "Cold retention re-check", hi: "शीत प्रतिधारण पुनःपरीक्षण" },
   "recheck.subtitle": {
@@ -388,6 +477,19 @@ export function ui(key: UiKey, locale: Locale): string {
   const entry = UI[key];
   if (locale === "sat") return entry.sat ?? entry.en;
   return entry[locale] || entry.en;
+}
+
+/**
+ * Resolve content authored in `src/modules/*.json`.
+ *
+ * Same fallback rule as `ui`, and it lives beside it so the rule exists once.
+ * A trainee reading a consequence string in the wrong language is not a
+ * cosmetic problem — the string is safety content, and `sat` is deliberately
+ * left falling back to English rather than being machine-translated.
+ */
+export function localise(value: Localised, locale: Locale): string {
+  if (locale === "sat") return value.sat ?? value.en;
+  return value[locale] || value.en;
 }
 
 export const LOCALE_LABELS: Record<Locale, string> = {

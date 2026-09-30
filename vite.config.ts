@@ -4,6 +4,19 @@ import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // `mind-ar` ships its own workers and HTML templates and imports them with
+  // Vite's `?worker&inline` and `?raw` suffixes. The dependency pre-bundler
+  // resolves those imports itself, cannot find them, and takes the dev server
+  // down with a wall of "No such file or directory" before it ever serves a
+  // page. The production build is unaffected — it resolves them through the
+  // normal module graph — so the failure only ever appears in development, and
+  // only after something forces the optimiser to run again.
+  //
+  // Excluding the package hands it back to Vite's normal dev resolution, where
+  // those suffixes mean what they are supposed to mean.
+  optimizeDeps: {
+    exclude: ["mind-ar"],
+  },
   server: {
     host: "0.0.0.0",
     port: 5173,

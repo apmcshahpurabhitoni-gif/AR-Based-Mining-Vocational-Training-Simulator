@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, ShieldCheck, TriangleAlert } from "lucide-react";
 import { useSession, useT } from "../lib/session";
+import { BuildNoticeBar } from "../components/BuildNotice";
 import { GOOGLE_CLIENT_ID } from "../lib/api";
 import { Button } from "../components/ui";
 import { LOCALE_LABELS, SELECTABLE_LOCALES } from "../lib/i18n";
@@ -190,6 +191,18 @@ export function Auth() {
 
   return (
     <div className="grid min-h-dvh lg:grid-cols-[1fr_1.1fr]">
+      {/*
+        * The build status, on the sign-in page too.
+        *
+        * This page is reachable directly by URL — someone who has the APK has a
+        * link to it — and it is the last screen before an account exists, so it
+        * is the last place a first-time user can be told what they have
+        * installed. See `BuildNotice`.
+        */}
+      <div className="col-span-full">
+        <BuildNoticeBar />
+      </div>
+
       {/* -- Form ----------------------------------------------------------- */}
       <div className="flex flex-col px-5 py-8 sm:px-10 lg:px-16">
         <div className="flex items-center justify-between">

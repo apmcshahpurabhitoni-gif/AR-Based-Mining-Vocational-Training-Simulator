@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useSession, useT } from "../lib/session";
 import { Button, Chip, LinkButton } from "../components/ui";
+import { BuildNoticeCard } from "../components/BuildNotice";
 import { BACKEND_LABEL, fetchDemoStats, publishBundledModules } from "../lib/api";
 import { GATE_THRESHOLDS } from "../lib/gate";
 import { LOCALE_LABELS, SELECTABLE_LOCALES } from "../lib/i18n";
@@ -228,6 +229,19 @@ export function Landing() {
               <p className="mt-2 text-sm leading-relaxed text-fog-300">
                 {t("landing.status.body")}
               </p>
+            </div>
+
+            {/*
+              * The build status, next to the pre-pilot disclosure and for the
+              * same reason. The disclosure above is about the *curriculum* — a
+              * step the reviewer has not approved, so no certificate. This one
+              * is about the *software*: it is a working build, and on a phone
+              * that arrived as an installed file, an app with a certificate in
+              * its name and no status line is indistinguishable from a finished
+              * product. The two answers are different and both are needed.
+              */}
+            <div className="mt-3 max-w-2xl">
+              <BuildNoticeCard />
             </div>
           </div>
 

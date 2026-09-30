@@ -28,6 +28,11 @@ import {
   type Session,
 } from "./api";
 import { SELECTABLE_LOCALES, ui, type UiKey } from "./i18n";
+import {
+  clearCachedProfile as clearCache,
+  readCachedProfile as readCache,
+  writeCachedProfile as writeCache,
+} from "./profile-cache";
 import type { Locale } from "./types";
 
 const TOKEN_KEY = "kavach.token";
@@ -40,6 +45,16 @@ export interface SessionContextValue {
   /** True only during the very first load, so pages don't flash signed-out. */
   booting: boolean;
   backendReachable: boolean;
+  /**
+   * True when `profile` came from this device rather than from the server.
+   *
+   * It is a cached copy, last written when the server answered. It exists so
+   * the app is usable underground, and it is display-only: it is never trusted
+   * for an authorisation decision, because a value a trainee can edit in
+   * localStorage cannot be evidence of anything. Every call the server owns
+   * still goes to the server.
+   */
+  profileStale: boolean;
 
   locale: Locale;
   setLocale: (locale: Locale) => void;
@@ -69,6 +84,22 @@ function readToken(): string | null {
   }
 }
 
+/**
+ * The last profile the server confirmed, kept so the app can be opened with
+ * no network. See `profile-cache.ts` for why this exists and what it is not.
+ */
+function readCachedProfile(): Profile | null {
+  return readCache(typeof localStorage === "undefined" ? null : localStorage);
+}
+
+function writeCachedProfile(profile: Profile): void {
+  writeCache(typeof localStorage === "undefined" ? null : localStorage, profile);
+}
+
+function clearCachedProfile(): void {
+  clearCache(typeof localStorage === "undefined" ? null : localStorage);
+}
+
 function readLocale(): Locale {
   try {
     const stored = localStorage.getItem(LOCALE_KEY) as Locale | null;
@@ -83,6 +114,7 @@ function readLocale(): Locale {
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(readToken);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [profileStale, setProfileStale] = useState(false);
   const [booting, setBooting] = useState(true);
   const [backendReachable, setBackendReachable] = useState(true);
   const [locale, setLocaleState] = useState<Locale>(readLocale);
@@ -92,21 +124,47 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setToken(current);
     if (!current) {
       setProfile(null);
+      setProfileStale(false);
       setBooting(false);
       return;
     }
     const result = await fetchProfile(current);
     setBackendReachable(result.ok);
+
     if (!result.ok) {
-      // The backend is unreachable, not the session invalid. Keep the token —
-      // a trainee in a dead zone must not be signed out — and leave the
-      // profile null so protected routes show an offline notice instead.
-      setProfile(null);
+      /*
+       * The backend is unreachable, NOT the session invalid. Two different
+       * things, and conflating them is what made this app unusable in the one
+       * situation it is built for.
+       *
+       * `RequireAuth` sends anyone without a profile to the sign-in page, so
+       * leaving `profile` null here meant a trainee who lost signal underground
+       * was bounced to a password prompt and could not reach training, the
+       * dashboard, or their own results — with a whole local-first database,
+       * event queue and local assessment sitting unused on their handset. The
+       * offline path could not be taken because the app never let anyone onto
+       * it.
+       *
+       * So: keep the token, and fall back to the copy of the profile this
+       * device already has. It is display-only and marked stale. The server
+       * still decides every call it owns.
+       */
+      const cached = readCachedProfile();
+      setProfile(cached);
+      setProfileStale(cached !== null);
     } else {
+      setProfileStale(false);
       setProfile(result.value);
-      if (result.value?.preferredLocale) {
-        const pref = result.value.preferredLocale as Locale;
-        if (SELECTABLE_LOCALES.includes(pref)) setLocaleState(pref);
+      if (result.value) {
+        writeCachedProfile(result.value);
+        if (result.value.preferredLocale) {
+          const pref = result.value.preferredLocale as Locale;
+          if (SELECTABLE_LOCALES.includes(pref)) setLocaleState(pref);
+        }
+      } else {
+        // The server answered and said this token is not valid. That is a real
+        // sign-out, unlike a network failure, so the cached identity goes too.
+        clearCachedProfile();
       }
     }
     setBooting(false);
@@ -147,6 +205,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(TOKEN_KEY, session.token);
     setToken(session.token);
     setProfile(session.profile);
+    setProfileStale(false);
+    writeCachedProfile(session.profile);
     setBackendReachable(true);
   }, []);
 
@@ -188,8 +248,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     } catch {
       // non-fatal
     }
+    // The cached identity goes with the token. Leaving it behind would let the
+    // next person to pick up the handset into a signed-in shell.
+    clearCachedProfile();
     setToken(null);
     setProfile(null);
+    setProfileStale(false);
   }, []);
 
   const updateName = useCallback(
@@ -197,7 +261,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const current = readToken();
       if (!current) return;
       const result = await apiUpdateProfile(current, { name });
-      if (result.ok) setProfile(result.value);
+      // A successful call that returns no profile is not a successful rename;
+      // writing `null` to the cache would lock the next offline load out of
+      // its own app.
+      if (result.ok && result.value) {
+        setProfile(result.value);
+        writeCachedProfile(result.value);
+      }
     },
     [],
   );
@@ -208,6 +278,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       token,
       booting,
       backendReachable,
+      profileStale,
       locale,
       setLocale,
       signIn,
@@ -222,6 +293,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       token,
       booting,
       backendReachable,
+      profileStale,
       locale,
       setLocale,
       signIn,

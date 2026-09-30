@@ -24,7 +24,7 @@
  * each frame.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import type { RoomObject } from "../lib/room";
 import {
@@ -34,10 +34,54 @@ import {
   radiusOf,
   type PropKind,
 } from "../lib/ar/prop-shapes";
-import { ROOM, SCENERY, pushOutOfSolids, scenerySolids } from "../lib/environment";
+import {
+  ENTRY,
+  EXIT_MOUTH,
+  ROCK_RING_COUNT,
+  ROOM,
+  SCENERY,
+  pushOutOfSolids,
+  scenerySolids,
+} from "../lib/environment";
+import { PAINT, paintPieces } from "../lib/floor-paint";
+import { entryFrame, observeFrame, type SpawnFrame } from "../lib/spawn-framing";
+import { LANDMARKS, describeWhere, landmarkDistance, landmarksNear } from "../lib/landmarks";
+import {
+  BUTTON_ANSWER,
+  BUTTON_HOME,
+  isTouchPrimary,
+  lookPitch,
+  lookYaw,
+  prefersReducedMotion,
+  reached,
+  stickVector,
+} from "../lib/input-prefs";
+import {
+  CEILING_LAMPS,
+  LIT_LAMP_INDICES,
+  bakeVertexColours,
+  floorAoFromUv,
+  wallAoFromUv,
+} from "../lib/room-lighting";
+import { paintEnvironment } from "../lib/room-env";
+import { resolveView, type RoomView } from "../lib/room-views";
+import { FrameMeter, readoutLines } from "../lib/frame-stats";
+import {
+  describeProfile,
+  isRenderTier,
+  profileForTier,
+  readDeviceFacts,
+  renderProfile,
+  type RenderProfile,
+} from "../lib/device-profile";
 import {
   ACESFilmicToneMapping,
   AmbientLight,
+  BufferAttribute,
+  PMREMGenerator,
+  EquirectangularReflectionMapping,
+  SRGBColorSpace,
+  TorusGeometry,
   BoxGeometry,
   BufferGeometry,
   CanvasTexture,
@@ -48,6 +92,10 @@ import {
   Fog,
   Group,
   IcosahedronGeometry,
+  InstancedMesh,
+  Matrix4,
+  Quaternion,
+  Euler,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
@@ -192,7 +240,68 @@ const SLOTS: ReadonlyArray<readonly [number, number, number]> = [
  * Where the trainee enters the room, and therefore what they are looking at
  * when a step opens.
  */
-const SPAWN_Z = ROOM_D / 2 - 1.2;
+const SPAWN_Z = ENTRY.z;
+
+/**
+ * The render profile for this device, resolved once per page load.
+ *
+ * Module-level rather than per-component so that reopening the room — which
+ * happens on every step — does not re-read the URL, and so that two surfaces
+ * in the same page can never disagree about what the device can afford.
+ */
+let cachedProfile: RenderProfile | null = null;
+
+function detectProfile(): RenderProfile {
+  if (cachedProfile) return cachedProfile;
+  const forced = readParam("quality");
+  cachedProfile = isRenderTier(forced) ? profileForTier(forced) : renderProfile(readDeviceFacts());
+  return cachedProfile;
+}
+
+function readParam(name: string): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return new URLSearchParams(window.location.search).get(name);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The first connected gamepad, or null.
+ *
+ * `getGamepads` returns a sparse array with null holes, and it is absent
+ * entirely on some mobile browsers, so both are handled rather than indexed
+ * into. Polled once per frame, which is what the API is for — there is no
+ * connect event worth listening to for a room that mounts and unmounts with
+ * every step.
+ */
+function firstGamepad(): Gamepad | null {
+  if (typeof navigator === "undefined" || typeof navigator.getGamepads !== "function") return null;
+  const pads = navigator.getGamepads();
+  if (!pads) return null;
+  for (const pad of pads) {
+    if (pad && pad.connected) return pad;
+  }
+  return null;
+}
+
+/**
+ * The `?view=` value, read without touching the router.
+ *
+ * Read directly from `location.search` because a preset has to produce the
+ * same frame on every device, and routing a change through React would let the
+ * camera move between two screenshots that are supposed to be the same shot.
+ * A change of preset is a change of URL, and a reload.
+ */
+function readViewParam(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return new URLSearchParams(window.location.search).get("view");
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Interactables are laid out on a shallow arc in front of the entry, not
@@ -339,6 +448,40 @@ export function Scene3D({
   const mountRef = useRef<HTMLDivElement>(null);
   const padRef = useRef({ x: 0, y: 0, active: false });
   const turnRef = useRef(0);
+  /**
+   * "Back to the entry", from the bottom bar.
+   *
+   * A ref rather than state, like every other control here: it is consumed by
+   * the frame loop and it must never re-render a component that owns a WebGL
+   * context. Cheapest possible fix for the trainee who has walked into a corner
+   * of a 26 m room and cannot work out which way is which.
+   */
+  const homeRef = useRef(false);
+  /**
+   * Where the camera is, published for the Find-and-Learn panel.
+   *
+   * Written by the loop, read when the panel opens. The panel wants landmarks
+   * nearest-first, which is a question about where the trainee is standing — but
+   * the answer only has to be right when the panel is *opened*, so it is read
+   * once on open rather than re-rendering a list sixty times a second.
+   */
+  const camPosRef = useRef<{ x: number; z: number }>({ x: ENTRY.x, z: ENTRY.z });
+  /**
+   * Has the device asked for less motion?
+   *
+   * Read once, like the render profile, because it cannot change mid-session
+   * without a reload and the room is rebuilt from scratch when it does. The
+   * gesture-triggered controls are unaffected — a trainee who drags the view is
+   * in control — and what it switches off is the one piece of motion this room
+   * initiates on its own.
+   */
+  const reducedMotion = useRef(
+    prefersReducedMotion(typeof window === "undefined" ? null : window),
+  );
+  /** Find and Learn — `docs/16` phase 6. Navigation only; see the panel below. */
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [panelList, setPanelList] = useState<typeof LANDMARKS>(LANDMARKS);
+  const [chosen, setChosen] = useState<string | null>(null);
   // Label nodes, positioned imperatively by the render loop. Keeping them in a
   // ref means a 60 fps room triggers zero React re-renders.
   const labelNodes = useRef<Array<HTMLElement | null>>([]);
@@ -358,6 +501,53 @@ export function Scene3D({
   /** The bay map canvas. Drawn from the same world positions the room is. */
   const miniRef = useRef<HTMLCanvasElement | null>(null);
 
+  /*
+   * Review view, from `?view=`.
+   *
+   * Read once, from the URL, and deliberately NOT through React state or a
+   * router param. Changing a preset has to reload the page, because the point
+   * is that the frame is identical on every device — a preset that could be
+   * changed in place would be one more thing to differ between two
+   * screenshots.
+   */
+  const view = useMemo<RoomView | null>(() => resolveView(readViewParam()), []);
+
+  /*
+   * The readout. On when a preset is loaded, because a review screenshot wants
+   * its numbers in frame, and available on demand otherwise.
+   */
+  const [showStats, setShowStats] = useState(view !== null);
+  /*
+   * Written imperatively from the render loop, like the labels and the bay
+   * map. Going through React state would mean 60 re-renders a second of a
+   * component that owns a WebGL context — the readout would cost more than
+   * everything it is measuring.
+   */
+  const statsRef = useRef<HTMLDivElement | null>(null);
+  const statsVisibleRef = useRef(showStats);
+  statsVisibleRef.current = showStats;
+
+  /**
+   * The preset, read by the render loop.
+   *
+   * A ref rather than a dependency, for the same reason `selectedId` is: it is
+   * fixed for the life of the mount, and it must not be able to rebuild the
+   * scene.
+   */
+  const viewRef = useRef(view);
+  viewRef.current = view;
+
+  /**
+   * What this device can afford.
+   *
+   * A ref, and read once per mount, because `antialias` is a context attribute:
+   * changing the profile after the renderer exists is not possible, so this
+   * must be settled before construction and must not be a dependency that can
+   * trigger a rebuild. `?quality=` overrides the detected tier, so the three
+   * settings can be compared on one phone rather than argued about.
+   */
+  const profileRef = useRef<RenderProfile>(detectProfile());
+
   // Selection is read through a ref, not a dependency. It used to be a
   // dependency, which meant every tap destroyed and rebuilt the whole scene —
   // the trainee was teleported back to the door the moment they answered, and
@@ -375,7 +565,13 @@ export function Scene3D({
 
     let renderer: WebGLRenderer;
     try {
-      renderer = new WebGLRenderer({ antialias: true, powerPreference: "low-power" });
+      renderer = new WebGLRenderer({
+        // Not a constant. MSAA is a context attribute, so it can only be
+        // chosen here, and on a phone it pays for the same edges twice — the
+        // pixel ratio already supersamples. See `device-profile.ts`.
+        antialias: profileRef.current.antialias,
+        powerPreference: "low-power",
+      });
     } catch {
       // No WebGL, or the context is refused. The 2D scene is a complete
       // fallback, so this is never fatal.
@@ -383,12 +579,30 @@ export function Scene3D({
       return;
     }
 
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // The size of the framebuffer is the single biggest lever in this renderer.
+    // Capped at 2 everywhere and lower on a phone: fill rate, not geometry, is
+    // what makes these devices slow, and nothing about the room needs 2.75×.
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, profileRef.current.maxPixelRatio));
     // Shadows and tone mapping. Between them these do more for the room than
     // any amount of extra geometry: contact shadows are what stop a prop
     // floating, and ACES keeps the sodium lamps from clipping to white.
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = PCFSoftShadowMap;
+    /*
+     * The shadow map is rendered ONCE, not every frame.
+     *
+     * This is the largest single saving in Phase 1 and it costs nothing
+     * visually, which is rare. The room has exactly one shadow-casting light,
+     * it never moves, and nothing in the scene ever moves either — so a
+     * per-frame shadow pass was re-rasterising a 1024² depth buffer sixty
+     * times a second to produce the same sixteen thousand pixels sixty times
+     * over. Walking the camera does not affect it: a directional light's
+     * shadow camera is fixed to the light, not to the viewer.
+     *
+     * `needsUpdate` is set once at the end of construction, and again only if
+     * the scene is rebuilt — which is the one time the depth can change.
+     */
+    renderer.shadowMap.autoUpdate = false;
     renderer.toneMapping = ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.05;
     renderer.domElement.style.display = "block";
@@ -409,6 +623,39 @@ export function Scene3D({
     // Depth cue. Without it a grey room in dim light reads as a flat backdrop.
     scene.fog = new Fog("#0a0d12", 18, 46);
 
+    /*
+     * One image-based light, replacing the flat ambient as the source of
+     * indirect light.
+     *
+     * The room already used PBR materials; what they lacked was anything to
+     * reflect, which is why a metal handrail rendered black and every surface
+     * got its ambient from a constant. A PMREM of a painted mine interior gives
+     * the whole room a directional, warm, occluded ambient for the cost of one
+     * small texture and no extra light.
+     *
+     * Skipped on the low tier, where the flat ambient stays as the fallback —
+     * the room looks flatter there, which is the honest trade for a frame.
+     */
+    if (profileRef.current.tier !== "low") {
+      const equirect = paintEnvironment();
+      if (equirect) {
+        try {
+          const pmrem = new PMREMGenerator(renderer);
+          const envTex = new CanvasTexture(equirect);
+          envTex.mapping = EquirectangularReflectionMapping;
+          envTex.colorSpace = SRGBColorSpace;
+          // The prefiltered mip chain is the expensive part and it is exactly
+          // what makes roughness work, so it is kept; the source canvas is not.
+          scene.environment = pmrem.fromEquirectangular(envTex).texture;
+          envTex.dispose();
+          pmrem.dispose();
+        } catch {
+          // No float render targets, or a context without them. The room still
+          // renders, on the ambient light it had before.
+        }
+      }
+    }
+
     const camera = new PerspectiveCamera(FOV_DEG, 1, 0.1, 100);
     camera.position.set(0, EYE_H, SPAWN_Z);
 
@@ -419,12 +666,26 @@ export function Scene3D({
     // dark side has no shape. It is 0.34 now, so the directional light actually
     // models the geometry, and the sodium lamps read as light rather than as a
     // general brightening.
-    scene.add(new AmbientLight("#5c6b80", 0.34));
+    /*
+     * Ambient, at 0.34, down to 0.12 where the environment map is carrying the
+     * indirect light.
+     *
+     * Leaving both at full strength would be a double count: an `AmbientLight`
+     * adds the same amount of light to every surface regardless of direction,
+     * which is precisely the term the environment map replaces. Keeping it high
+     * would flatten the room straight back to where Phase 2 found it, and the
+     * baked occlusion would be fighting a constant that ignores it.
+     *
+     * On the low tier there is no environment map, so the flat light stays —
+     * dimmer, because the baked vertex occlusion now darkens the corners for
+     * real, and 0.34 on top of that is the old washed-out corner.
+     */
+    scene.add(new AmbientLight("#5c6b80", profileRef.current.tier === "low" ? 0.2 : 0.1));
 
     const key = new DirectionalLight("#ffe0b0", 1.45);
     key.position.set(5, 11, 4);
     key.castShadow = true;
-    key.shadow.mapSize.set(2048, 2048);
+    key.shadow.mapSize.set(profileRef.current.shadowMapSize, profileRef.current.shadowMapSize);
     key.shadow.camera.near = 1;
     key.shadow.camera.far = 40;
     key.shadow.camera.left = -ROOM_W / 2;
@@ -442,15 +703,39 @@ export function Scene3D({
     fill.position.set(-7, 3, -6);
     scene.add(fill);
 
+    /*
+     * The fixtures.
+     *
+     * Five strip lights, which is what the ceiling says the room's length is.
+     * They are unlit emissive boxes, not `PointLight`s: a light is a term in
+     * every fragment's shading loop, on every pixel, every frame, and five more
+     * of them would cost more than everything else in this renderer put
+     * together. A mesh that is simply bright costs five triangles' worth of
+     * fill and nothing else, and from eye height it is the fixtures — not their
+     * illumination — that you actually see.
+     *
+     * The pools of light on the floor are already there: the point lights below
+     * do that, and they are the three that matter.
+     */
+
     // Sodium-ish pools, the way a mine workshop is actually lit.
+    //
+    // Hung under three of the five visible strip lights, and that is the whole
+    // reason the light data lives in `room-lighting.ts`: the positions are read
+    // from the same list the fittings are built from, so a trainee who looks up
+    // at a lamp can see the pool of light it is making on the floor. They used
+    // to be three arbitrary points, and the room had bright patches on the
+    // floor under nothing at all.
+    //
+    // Three, not five, because each of these is a term in every fragment's
+    // shading loop on every pixel of every frame. `LIT_LAMP_INDICES` names the
+    // three that carry a light, so the trade is visible in one place.
     const lamps: PointLight[] = [];
-    for (const [x, z] of [
-      [-5, -4],
-      [5, 4],
-      [0, 5],
-    ] as const) {
-      const lamp = new PointLight("#ffb457", 30, 20, 2);
-      lamp.position.set(x, WALL_H - 0.7, z);
+    for (const index of LIT_LAMP_INDICES) {
+      const fixture = CEILING_LAMPS[index];
+      if (!fixture) continue;
+      const lamp = new PointLight("#ffb457", 26, 18, 2);
+      lamp.position.set(fixture.x, fixture.y - 0.1, fixture.z);
       scene.add(lamp);
       lamps.push(lamp);
     }
@@ -523,22 +808,46 @@ export function Scene3D({
       color: "#ffffff",
       roughness: 0.88,
       metalness: 0.05,
+      // Baked occlusion rides in on the vertex colour, because a tiled texture
+      // cannot carry it: the corners are not where the texture repeats. One
+      // multiply per fragment, no SSAO pass, no depth pre-pass.
+      vertexColors: true,
+      envMapIntensity: profileRef.current.tier === "low" ? 0 : 0.85,
     });
     const wallMat = new MeshStandardMaterial({
       map: wallTex,
       color: "#ffffff",
       roughness: 0.92,
       side: DoubleSide,
+      vertexColors: true,
+      envMapIntensity: profileRef.current.tier === "low" ? 0 : 0.7,
     });
 
-    const floor = new Mesh(new PlaneGeometry(ROOM_W, ROOM_D), floorMat);
+    /*
+     * Floor, subdivided so the bake has somewhere to live.
+     *
+     * 24 x 18 is 864 triangles over 416 square metres — one triangle every
+     * square metre, which is far coarser than the occlusion needs and still
+     * invisible as geometry, because a flat plane has no silhouette to lose.
+     */
+    const floorGeo = new PlaneGeometry(ROOM_W, ROOM_D, 24, 18);
+    floorGeo.setAttribute(
+      "color",
+      new BufferAttribute(bakeVertexColours(25, 19, floorAoFromUv), 3),
+    );
+    const floor = new Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
     world.add(floor);
 
     const ceiling = new Mesh(
       new PlaneGeometry(ROOM_W, ROOM_D),
-      new MeshStandardMaterial({ map: roofTex, roughness: 0.98, side: DoubleSide }),
+      new MeshStandardMaterial({
+        map: roofTex,
+        roughness: 0.98,
+        side: DoubleSide,
+        envMapIntensity: profileRef.current.tier === "low" ? 0 : 0.4,
+      }),
     );
     ceiling.rotation.x = Math.PI / 2;
     ceiling.position.y = WALL_H;
@@ -550,10 +859,13 @@ export function Scene3D({
       [-ROOM_W / 2, 0, Math.PI / 2],
       [ROOM_W / 2, 0, -Math.PI / 2],
     ] as const) {
-      const wall = new Mesh(
-        new PlaneGeometry(x === 0 ? ROOM_W : ROOM_D, WALL_H),
-        wallMat,
+      const span = x === 0 ? ROOM_W : ROOM_D;
+      const wallGeo = new PlaneGeometry(span, WALL_H, 24, 5);
+      wallGeo.setAttribute(
+        "color",
+        new BufferAttribute(bakeVertexColours(25, 6, wallAoFromUv), 3),
       );
+      const wall = new Mesh(wallGeo, wallMat);
       wall.position.set(x, WALL_H / 2, z);
       wall.rotation.y = rotY;
       wall.receiveShadow = true;
@@ -598,6 +910,87 @@ export function Scene3D({
       world.add(beam);
     }
 
+    /*
+     * Overhead services, and the lamps between them.
+     *
+     * From standing height you never see the middle of a ceiling — you see its
+     * far end. So what the ceiling has to contain is things with a *silhouette*
+     * against it: a ventilation duct the width of a torso, a cable tray, and a
+     * row of lit strips that tell you the room is 4.6 m high and how far it
+     * goes. An empty textured plane above you reads as a lid.
+     *
+     * The duct and the trays share one geometry each and are drawn as a single
+     * mesh per material, so the whole ceiling services costs three draw calls
+     * rather than the eleven a mesh-per-run would.
+     */
+    const serviceMat = new MeshStandardMaterial({
+      color: "#6b6257",
+      roughness: 0.72,
+      metalness: 0.3,
+      envMapIntensity: profileRef.current.tier === "low" ? 0 : 0.5,
+    });
+
+    // Ventilation ducting, the big one, running the length of the room.
+    const ductGeo = keep(new CylinderGeometry(0.62, 0.62, ROOM_D - 1.6, 12, 1, true));
+    const duct = new Mesh(ductGeo, serviceMat);
+    duct.rotation.x = Math.PI / 2;
+    duct.position.set(-6.2, WALL_H - 0.78, 0);
+    duct.castShadow = true;
+    world.add(duct);
+
+    // Flanges, so the duct reads as ducting and not as a pipe. Instanced for
+    // the same reason the rock ring is: four identical objects at four
+    // positions is one draw call, not four.
+    const flangeGeo = keep(new TorusGeometry(0.64, 0.055, 6, 14));
+    const flanges = new InstancedMesh(flangeGeo, serviceMat, 4);
+    const svc = new Matrix4();
+    [-6, -2, 2, 6].forEach((z, i) => {
+      svc.makeTranslation(-6.2, WALL_H - 0.78, z);
+      flanges.setMatrixAt(i, svc);
+    });
+    flanges.instanceMatrix.needsUpdate = true;
+    world.add(flanges);
+
+    // Cable tray, narrower, on the other side of the room.
+    const trayGeo = keep(new BoxGeometry(0.34, 0.1, ROOM_D - 2.2));
+    const tray = new Mesh(trayGeo, serviceMat);
+    tray.position.set(7.4, WALL_H - 0.5, 0);
+    tray.castShadow = true;
+    world.add(tray);
+
+    /*
+     * The strip lights. Unlit and emissive on purpose — see the note above.
+     *
+     * Instanced, like the flanges: the whole ceiling services is then five draw
+     * calls rather than the sixteen a mesh-per-fitting would cost, which is the
+     * same trade Phase 1 made for the rock ring and the reason that lesson
+     * belonged in a data layer everyone reuses.
+     *
+     * `side: DoubleSide` because a box seen from below at a shallow angle shows
+     * its underside, and a black underside would put a dark stripe exactly
+     * where the light is supposed to be.
+     */
+    const lampMat = new MeshBasicMaterial({ color: "#ffd9a0", side: DoubleSide });
+    const lampGeo = keep(new BoxGeometry(2.1, 0.09, 0.34));
+    const housings = new InstancedMesh(lampGeo, darkMat, CEILING_LAMPS.length);
+    const fittings = new InstancedMesh(lampGeo, lampMat, CEILING_LAMPS.length);
+    const housingMatrix = new Matrix4();
+    CEILING_LAMPS.forEach((lamp, i) => {
+      svc.makeTranslation(lamp.x, lamp.y, lamp.z);
+      fittings.setMatrixAt(i, svc);
+      // The housing it sits in, so the light has something to be in rather
+      // than floating against a dark ceiling.
+      housingMatrix.compose(
+        new Vector3(lamp.x, lamp.y + 0.06, lamp.z),
+        new Quaternion(),
+        new Vector3(1.08, 1.7, 1.5),
+      );
+      housings.setMatrixAt(i, housingMatrix);
+    });
+    fittings.instanceMatrix.needsUpdate = true;
+    housings.instanceMatrix.needsUpdate = true;
+    world.add(fittings, housings);
+
     // -- Rock ----------------------------------------------------------------
     // What makes this a mine rather than a warehouse.
     //
@@ -608,31 +1001,62 @@ export function Scene3D({
     // and that extends to the scenery.
     const rockGeo = keep(new IcosahedronGeometry(0.8, 0));
     const rockMat = new MeshStandardMaterial({ color: "#5f574c", roughness: 1 });
-    for (let i = 0; i < 26; i++) {
-      const along = i / 25;
+    /*
+     * The rock ring, as one InstancedMesh.
+     *
+     * Twenty-six identical boulders were twenty-six draw calls and twenty-six
+     * submissions to the shadow pass, for geometry that never moves and is
+     * never picked — instancing turns the whole ring into a single call. This
+     * is the cheapest saving in the renderer and it is invisible: the same
+     * twenty-six rocks, in the same deterministic places, because the
+     * transforms are the same sines.
+     *
+     * One caveat worth knowing: an InstancedMesh is a single object, so it must
+     * never end up in the pickable list — a raycast against it tests all
+     * twenty-six boulders at once. It does not, because the pickable list is
+     * built from the step's answerable objects and never from scenery.
+     */
+    const rockRing = new InstancedMesh(rockGeo, rockMat, ROCK_RING_COUNT);
+    const rockMatrix = new Matrix4();
+    const rockQuat = new Quaternion();
+    const rockEuler = new Euler();
+    const rockPos = new Vector3();
+    const rockScale = new Vector3();
+    for (let i = 0; i < ROCK_RING_COUNT; i++) {
+      const along = i / (ROCK_RING_COUNT - 1);
       const side = i % 2 === 0 ? -1 : 1;
       const x = (along * 2 - 1) * (ROOM_W / 2 - 1.1);
       const z = side * (ROOM_D / 2 - 0.9) + Math.sin(i * 2.3) * 0.5;
-      const rock = new Mesh(rockGeo, rockMat);
-      rock.position.set(x, 0.16 + Math.abs(Math.sin(i * 1.7)) * 0.22, z);
-      rock.rotation.set(Math.sin(i * 0.9) * 0.6, i * 1.3, Math.cos(i * 1.1) * 0.4);
-      rock.scale.set(0.7 + Math.abs(Math.sin(i * 0.7)) * 0.9, 0.45, 0.6 + Math.abs(Math.cos(i)) * 0.7);
-      rock.castShadow = true;
-      rock.receiveShadow = true;
-      world.add(rock);
+      rockPos.set(x, 0.16 + Math.abs(Math.sin(i * 1.7)) * 0.22, z);
+      rockEuler.set(Math.sin(i * 0.9) * 0.6, i * 1.3, Math.cos(i * 1.1) * 0.4);
+      rockQuat.setFromEuler(rockEuler);
+      rockScale.set(
+        0.7 + Math.abs(Math.sin(i * 0.7)) * 0.9,
+        0.45,
+        0.6 + Math.abs(Math.cos(i)) * 0.7,
+      );
+      rockMatrix.compose(rockPos, rockQuat, rockScale);
+      rockRing.setMatrixAt(i, rockMatrix);
     }
+    rockRing.instanceMatrix.needsUpdate = true;
+    rockRing.castShadow = true;
+    rockRing.receiveShadow = true;
+    // A ring of boulders is scenery, and scenery is never pickable — only the
+    // 13-id marker vocabulary is. Stated here because an InstancedMesh in the
+    // pickable list would raycast against all 26 at once.
+    world.add(rockRing);
 
     // A tunnel mouth in the back wall. The room needs somewhere to lead, and
     // "find the nearest exit" is meaningless in a sealed box.
     const tunnelMat = new MeshStandardMaterial({ color: "#0b0a09", roughness: 1 });
     const tunnel = new Mesh(keep(new PlaneGeometry(2.6, 2.5)), tunnelMat);
-    tunnel.position.set(6.4, 1.25, -ROOM_D / 2 + 0.06);
+    tunnel.position.set(EXIT_MOUTH.x, 1.25, -ROOM_D / 2 + 0.06);
     world.add(tunnel);
     const frameMat = new MeshStandardMaterial({ color: "#8a8f96", roughness: 0.6, metalness: 0.4 });
     for (const [x, y, w, h] of [
-      [6.4, 2.62, 3.0, 0.16],
-      [5.0, 1.25, 0.16, 2.5],
-      [7.8, 1.25, 0.16, 2.5],
+      [EXIT_MOUTH.x, 2.62, 3.0, 0.16],
+      [EXIT_MOUTH.x - 1.4, 1.25, 0.16, 2.5],
+      [EXIT_MOUTH.x + 1.4, 1.25, 0.16, 2.5],
     ] as const) {
       const part = new Mesh(keep(new BoxGeometry(w, h, 0.2)), frameMat);
       part.position.set(x, y, -ROOM_D / 2 + 0.12);
@@ -640,20 +1064,49 @@ export function Scene3D({
       world.add(part);
     }
 
-    // Painted walkway, running from the entry to the tunnel mouth. It reads as
-    // "the safe route" and it is the only thing in the room with a direction,
-    // which at this size is what a trainee actually needs to orient by.
+    // Painted routes on the floor — the primary walkway from the entry to the
+    // tunnel, and a dashed alternate that leaves the entry on a different line
+    // and joins the same tunnel from the other side.
+    //
+    // It is the only thing in the room with a direction, which at this size is
+    // what a trainee actually needs to orient by. It is also the reason the
+    // alternates are dashed and the primary is not: this file does not say
+    // which way a person should take. That is safety content, it belongs to
+    // R9's review, and two identical solid lines would be a claim this project
+    // is not entitled to make.
+    //
+    // The geometry comes from `lib/floor-paint`, which is also where the test
+    // that keeps every route inside the room and clear of the plant lives. It
+    // used to be two hand-placed quads at a hardcoded x of 6.4, which meant the
+    // paint and the tunnel could disagree and nothing would notice.
     const walkwayMat = new MeshStandardMaterial({
       color: "#8a7326",
       roughness: 0.9,
       transparent: true,
       opacity: 0.7,
     });
-    for (const offset of [-1.3, 1.3] as const) {
-      const stripe = new Mesh(keep(new PlaneGeometry(0.16, ROOM_D - 2.4)), walkwayMat);
-      stripe.rotation.x = -Math.PI / 2;
-      stripe.position.set(6.4 + offset, 0.012, 0.6);
-      world.add(stripe);
+    const alternateMat = new MeshStandardMaterial({
+      color: "#5c6b73",
+      roughness: 0.9,
+      transparent: true,
+      opacity: 0.5,
+    });
+    for (const stroke of PAINT) {
+      const material = stroke.role === "walkway" ? walkwayMat : alternateMat;
+      for (const piece of paintPieces(stroke)) {
+        const dx = piece.bx - piece.ax;
+        const dz = piece.bz - piece.az;
+        const len = Math.hypot(dx, dz);
+        if (len < 1e-6) continue;
+        // A quad laid flat and turned to face along the run, so a dash is a
+        // dash and not a rectangle at an angle. "YXZ" is load-bearing: with the
+        // default order the yaw is applied before the lay-flat and cancels out,
+        // and every dash points the same way regardless of the route.
+        const stripe = new Mesh(keep(new PlaneGeometry(piece.width, len)), material);
+        stripe.rotation.set(-Math.PI / 2, 0, -Math.atan2(dx, dz), "YXZ");
+        stripe.position.set((piece.ax + piece.bx) / 2, 0.012, (piece.az + piece.bz) / 2);
+        world.add(stripe);
+      }
     }
 
     // -- Scenery -------------------------------------------------------------
@@ -753,6 +1206,14 @@ export function Scene3D({
     const anchors: Array<{ at: Vector3 }> = [];
     /** Where each object stands, for the label buttons. */
     const places: Array<{ x: number; z: number }> = [];
+    /**
+     * Whether each label is currently showing its "you have arrived" ring.
+     *
+     * Kept so the loop only touches a node when the answer changes: this runs
+     * sixty times a second over every label in the room, and a style write that
+     * sets the same value sixty times is still a style write.
+     */
+    const atArrival: boolean[] = [];
 
     /**
      * The shapes come from `lib/ar/prop-shapes`, which the camera AR view also
@@ -860,6 +1321,32 @@ export function Scene3D({
     }
     placesRef.current = places;
 
+    /*
+     * Spawn framing — `docs/16` phase 4.
+     *
+     * Every step used to open from one fixed point looking one fixed way, so a
+     * `decide` step (a comparison of four things side by side) and an `observe`
+     * step (one object against a wall) were framed identically. One of those is
+     * always wrong, and the wrong one is invisible: the room renders, the labels
+     * are there, and the trainee is looking at a wall.
+     *
+     * So the spawn is derived from what the step is asking about. Interactables
+     * are on the arc in front of the entry, so the entry is where the trainee
+     * stands. An observe step is about one thing, so the trainee stands back from
+     * that thing, facing it — which is also the only way the distractors on the
+     * same step end up in frame, and a distractor the trainee cannot see is not
+     * a distractor.
+     *
+     * The geometry and the tests are in `lib/spawn-framing`; this is the call.
+     * It changes where the camera starts and nothing else — a tap is still
+     * graded by the id it hits, in `runner.ts`, which this does not touch.
+     */
+    const spawnFrame: SpawnFrame = objects.some((o) => o.role === "interactable")
+      ? entryFrame()
+      : places[0]
+        ? observeFrame(places[0], scenerySolid)
+        : entryFrame();
+
     // -- Sizing --------------------------------------------------------------
     const resize = () => {
       const w = mount.clientWidth || 1;
@@ -921,10 +1408,30 @@ export function Scene3D({
     // points that axis at +Z — the near wall. So every trainee spawned 1.2 m
     // from a wall, staring at it, with the objects behind them and `W` walking
     // them into it. Zero is the value that means "into the room".
-    let yaw = 0;
-    let pitch = 0;
+    //
+    // A `?view=` preset overrides the spawn, and locks the camera. Locked,
+    // because a review screenshot that drifts the moment a phone auto-scrolls
+    // is not comparable with the last one, and a reviewer comparing two frames
+    // is the entire reason the preset exists.
+    const locked = viewRef.current;
+    let yaw = locked ? locked.yaw : spawnFrame.yaw;
+    let pitch = locked ? locked.pitch : 0;
+    /**
+     * Gamepad button state, kept between frames so a press is an event rather
+     * than a level. Polling a held button as 60 separate presses would answer
+     * a step sixty times, and a step answered sixty times is a step whose
+     * score depends on frame rate.
+     */
+    const padDown: boolean[] = [];
+    if (locked) camera.position.set(locked.x, locked.y, locked.z);
+    else camera.position.set(spawnFrame.x, EYE_H, spawnFrame.z);
     const forward = new Vector3();
     const right = new Vector3();
+    const meter = new FrameMeter();
+    /** What the crosshair is on, published for the readout. */
+    let aimedLabel = "";
+    /** Rate-limits the readout so it settles instead of flickering. */
+    let statsTick = 0;
 
     // Pointer state. One pair of handlers covers mouse and touch, so the two
     // platforms cannot drift apart.
@@ -938,6 +1445,13 @@ export function Scene3D({
     let walkTo: Vector3 | null = null;
     let walkLastD = Infinity;
     let walkStall = 0;
+
+    /**
+     * Is this a touch-first device? Read once, because the control layout cannot
+     * change under a trainee mid-session and re-deciding it per event would
+     * flicker the bar.
+     */
+    const isTouch = isTouchPrimary(typeof window === "undefined" ? null : window);
 
     /**
      * How far the pointer travelled from where it went down.
@@ -960,10 +1474,42 @@ export function Scene3D({
       // their mind, and continuing to the old target would feel like the app
       // ignoring them.
       walkTo = null;
-      renderer.domElement.setPointerCapture(e.pointerId);
+
+      /*
+       * Pointer lock, on a mouse.
+       *
+       * Drag-to-look is right for a thumb and wrong for a mouse: the cursor
+       * leaves the window halfway through every sweep, and in a 26 m room you
+       * sweep a lot. Locking hides the cursor and turns the mouse into a
+       * relative-look device, which is what the room already behaves like.
+       *
+       * Not on touch, because a phone has no cursor to hide and the gesture
+       * would eat the tap. And not under a review preset, whose whole contract
+       * is that the frame does not move.
+       */
+      const wantsLock = !locked && !isTouch && e.pointerType === "mouse" && !pointerLocked;
+      if (wantsLock) {
+        justLocked = true;
+        const asked = el.requestPointerLock?.();
+        // Chrome returns a promise that rejects if the document is not
+        // focused. Not being able to lock is not a reason to break the tap.
+        if (asked && typeof asked.catch === "function") asked.catch(() => {});
+      } else {
+        // Capturing the pointer *and* locking it fight each other, and the lock
+        // releases the capture anyway.
+        renderer.domElement.setPointerCapture(e.pointerId);
+      }
     };
 
     const onPointerMove = (e: PointerEvent) => {
+      if (locked) return;
+      if (pointerLocked) {
+        // Relative motion. No dead zone and no slop: a locked mouse reports raw
+        // deltas, and a click is not a look.
+        yaw -= e.movementX * TURN_SPEED;
+        pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, pitch - e.movementY * TURN_SPEED));
+        return;
+      }
       if (!dragging) return;
       const dx = e.clientX - lastX;
       const dy = e.clientY - lastY;
@@ -980,7 +1526,26 @@ export function Scene3D({
 
     const onPointerUp = (e: PointerEvent) => {
       dragging = false;
+      // The click that takes the pointer lock is a "look around" gesture, not an
+      // answer. Answering it as well would grade whatever happened to be under
+      // the crosshair at the moment the trainee first clicked.
+      if (justLocked) {
+        justLocked = false;
+        return;
+      }
       if (travel(e) > slopFor()) return; // that was a look, not a tap
+      // A review preset is a still frame. Taps do not move the camera and do
+      // not answer anything, so a screenshot taken from one is exactly the
+      // frame the URL names.
+      if (locked) return;
+
+      if (pointerLocked) {
+        // The cursor is hidden and pinned, so there is no pointer position to
+        // aim with. The crosshair is the aim, which is what it has always been
+        // for on this surface — see the highlight below.
+        answerAtCentre();
+        return;
+      }
 
       const rect = renderer.domElement.getBoundingClientRect();
       const ndc = new Vector2(
@@ -1016,11 +1581,55 @@ export function Scene3D({
       }
     };
 
+    /**
+     * Answer whatever the crosshair is on, and walk if it is on nothing.
+     *
+     * One function for two callers — a locked mouse and the gamepad's answer
+     * button — because "aim at the middle of the screen and press once" is one
+     * gesture, and two copies of it would drift.
+     */
+    const answerAtCentre = () => {
+      hit.setFromCamera(centre, camera);
+      const found = hit.intersectObjects(pickable, false)[0];
+      const id = found ? idOf.get(found.object as Mesh) : undefined;
+      if (id) {
+        onSelectRef.current(id);
+        return;
+      }
+      const ground = hit.ray.intersectPlane(floorPlane, new Vector3());
+      if (!ground) return;
+      const cx = Math.max(-(ROOM_W / 2 - WALL_MARGIN - BODY_R), Math.min(ROOM_W / 2 - WALL_MARGIN - BODY_R, ground.x));
+      const cz = Math.max(-(ROOM_D / 2 - WALL_MARGIN - BODY_R), Math.min(ROOM_D / 2 - WALL_MARGIN - BODY_R, ground.z));
+      walkTo = new Vector3(cx, 0, cz);
+      walkLastD = Infinity;
+      walkStall = 0;
+    };
+
+    /**
+     * Pointer lock state.
+     *
+     * `el` is declared below, so the lock change handler is registered after
+     * it. Escape leaves the lock without a click ever reaching the canvas, so
+     * without this the room would keep treating a released pointer as a held
+     * one and the view would keep turning.
+     */
+    let pointerLocked = false;
+    let justLocked = false;
+    const onLockChange = () => {
+      const was = pointerLocked;
+      pointerLocked = document.pointerLockElement === renderer.domElement;
+      if (was && !pointerLocked) {
+        justLocked = false;
+        releaseControls();
+      }
+    };
+
     const el = renderer.domElement;
     el.addEventListener("pointerdown", onPointerDown);
     el.addEventListener("pointermove", onPointerMove);
     el.addEventListener("pointerup", onPointerUp);
     el.addEventListener("pointercancel", onPointerUp);
+    document.addEventListener("pointerlockchange", onLockChange);
 
     padRef.current = { x: 0, y: 0, active: false };
 
@@ -1169,16 +1778,43 @@ export function Scene3D({
       g.fill();
     };
 
+    /*
+     * The one and only shadow render.
+     *
+     * `autoUpdate` was switched off when the renderer was built, so the map is
+     * stale until something says otherwise. This is that moment: every caster
+     * exists by now — the shell, the rock ring, the pipe run, and the props —
+     * and from here on nothing in this scene moves. The map is rendered on the
+     * first frame and then never again, for the life of the mount.
+     *
+     * Placed immediately before the loop starts rather than inside it, so a
+     * scene that is somehow torn down before its first frame does not pay for
+     * a shadow pass it never displayed.
+     */
+    renderer.shadowMap.needsUpdate = true;
+
     const tick = () => {
       frame = requestAnimationFrame(tick);
       const now = performance.now();
       const dt = Math.min((now - clock.last) / 1000, 0.05);
+      const rawMs = now - clock.last;
       clock.last = now;
+      const stats = meter.push(rawMs);
 
       // Turning, from keys or the on-screen buttons. Without this the only way
       // to look around was to drag the mouse, which is not a control scheme
       // anyone brings to a shared training handset.
-      let turn = turnRef.current;
+      //
+      // Nothing below this line moves the camera when a review preset is
+      // loaded. That is the whole contract of `?view=`: same URL, same frame,
+      // on any device. A preset that a stray drag or a held key could move is
+      // not a preset.
+      if (locked) {
+        yaw = locked.yaw;
+        pitch = locked.pitch;
+      }
+
+      let turn = locked ? 0 : turnRef.current;
       if (keys.has("q")) turn -= 1;
       if (keys.has("e")) turn += 1;
       if (turn !== 0) yaw += turn * KEY_TURN * dt;
@@ -1191,22 +1827,76 @@ export function Scene3D({
 
       let mx = 0;
       let mz = 0;
-      if (keys.has("w") || keys.has("arrowup")) mz += 1;
-      if (keys.has("s") || keys.has("arrowdown")) mz -= 1;
-      if (keys.has("a")) mx -= 1;
-      if (keys.has("d")) mx += 1;
-      if (padRef.current.active) {
-        mx += padRef.current.x;
-        mz -= padRef.current.y;
-      }
-      // A label was tapped: walk to the thing it names. This is the coarse
-      // control the wide room needs — judging where a spot on the floor is, in
-      // three dimensions, at 20 m, is a skill the exercise is not testing.
-      if (wantWalk.current) {
-        walkTo = new Vector3(wantWalk.current.x, 0, wantWalk.current.z);
-        walkLastD = Infinity;
-        walkStall = 0;
-        wantWalk.current = null;
+      if (!locked) {
+        if (keys.has("w") || keys.has("arrowup")) mz += 1;
+        if (keys.has("s") || keys.has("arrowdown")) mz -= 1;
+        if (keys.has("a")) mx -= 1;
+        if (keys.has("d")) mx += 1;
+        if (padRef.current.active) {
+          mx += padRef.current.x;
+          mz -= padRef.current.y;
+        }
+
+        /*
+         * "Back to the entry", from the bar or the gamepad.
+         *
+         * The cheapest fix there is for the trainee who has walked into a corner
+         * and lost the room. It puts the camera back on the step's own spawn
+         * framing rather than on a fixed point, so an observe step is re-framed
+         * on the thing it is about — which is the state the trainee was in when
+         * they could still see what to do.
+         */
+        if (homeRef.current) {
+          homeRef.current = false;
+          walkTo = null;
+          wantWalk.current = null;
+          camera.position.set(spawnFrame.x, EYE_H, spawnFrame.z);
+          yaw = spawnFrame.yaw;
+          pitch = 0;
+        }
+
+        /*
+         * Gamepad.
+         *
+         * Left stick walks, right stick looks, and the answer button answers
+         * whatever the crosshair is on. It is here because this is how the room
+         * gets demonstrated on a projector: a presenter holding a room on a
+         * phone-shaped handset is a hostage to the touch layout, and a stick is
+         * the control they already have in their hand.
+         *
+         * The deadzone and the diagonal clamp are in `lib/input-prefs`, because
+         * they are the two things that get this wrong silently.
+         */
+        const pad = firstGamepad();
+        if (pad) {
+          const move = stickVector(pad.axes[0] ?? 0, pad.axes[1] ?? 0);
+          mx += move.x;
+          mz -= move.y;
+          yaw -= lookYaw(pad.axes[2] ?? 0) * KEY_TURN * dt * 1.4;
+          pitch = Math.max(
+            -PITCH_LIMIT,
+            Math.min(PITCH_LIMIT, pitch + lookPitch(pad.axes[3] ?? 0) * KEY_TURN * dt * 1.4),
+          );
+          // Edges, not levels: a held button is one press.
+          for (const [index, onPress] of [
+            [BUTTON_ANSWER, answerAtCentre],
+            [BUTTON_HOME, () => { homeRef.current = true; }],
+          ] as const) {
+            const down = Boolean(pad.buttons[index]?.pressed);
+            if (down && !padDown[index]) onPress();
+            padDown[index] = down;
+          }
+        }
+
+        // A label was tapped: walk to the thing it names. This is the coarse
+        // control the wide room needs — judging where a spot on the floor is, in
+        // three dimensions, at 20 m, is a skill the exercise is not testing.
+        if (wantWalk.current) {
+          walkTo = new Vector3(wantWalk.current.x, 0, wantWalk.current.z);
+          walkLastD = Infinity;
+          walkStall = 0;
+          wantWalk.current = null;
+        }
       }
 
       // Two movement sources: what the trainee is holding, and where they
@@ -1282,6 +1972,7 @@ export function Scene3D({
       hit.setFromCamera(centre, camera);
       const aimed = hit.intersectObjects(pickable, false)[0];
       const aimedId = aimed ? idOf.get(aimed.object as Mesh) : undefined;
+      aimedLabel = aimedId ?? "";
       const chosen = selectedRef.current;
       for (const [id, mats] of bodies) {
         const base = resting.get(id) ?? "#000000";
@@ -1296,9 +1987,10 @@ export function Scene3D({
         crosshairRing.current.style.borderColor = on
           ? "rgba(251,191,36,0.9)"
           : "rgba(226,232,240,0.28)";
-        crosshairRing.current.style.transform = on
-          ? "translate(-50%, -50%) scale(1.25)"
-          : "translate(-50%, -50%) scale(1)";
+        crosshairRing.current.style.transform =
+          on && !reducedMotion.current
+            ? "translate(-50%, -50%) scale(1.25)"
+            : "translate(-50%, -50%) scale(1)";
       }
 
       // Project every label into screen space, straight onto its DOM node.
@@ -1328,7 +2020,35 @@ export function Scene3D({
             : Math.max(0, (LABEL_FAR - distance) / (LABEL_FAR - LABEL_NEAR));
         node.style.opacity = alpha.toFixed(2);
         node.style.transform = `translate(-50%, -100%) translate(${x.toFixed(1)}px, ${(y - 6).toFixed(1)}px)`;
+
+        /*
+         * "You have arrived."
+         *
+         * Nothing else in this room says it. The label fades with distance, the
+         * crosshair lights up on what you are aiming at, and a tap answers — but
+         * in a 26 m bay the difference between standing at the switchboard and
+         * standing near it is invisible, so a trainee who has walked to the right
+         * place has no confirmation and keeps walking. A ring around the name,
+         * the moment they are within arm's reach of the thing it names.
+         *
+         * Written straight to the node, like the position above, and only when
+         * it changes: this is a style write on a DOM node inside a frame loop,
+         * and a test cannot see it, so it has to be cheap by construction.
+         */
+        const arrived = reached(distance);
+        if (atArrival[i] !== arrived) {
+          atArrival[i] = arrived;
+          node.style.boxShadow = arrived
+            ? "0 0 0 2px rgba(74,222,128,0.9), 0 0 12px rgba(74,222,128,0.35)"
+            : "";
+        }
       }
+
+      // Published for the Find-and-Learn panel, which re-orders itself
+      // nearest-first when it is opened. A ref, not state: the panel does not
+      // need this sixty times a second, it needs it once.
+      camPosRef.current.x = camera.position.x;
+      camPosRef.current.z = camera.position.z;
 
       // The bay map is redrawn every other frame. It has nothing to do with the
       // camera update, so 30 Hz is indistinguishable from 60 and halves the
@@ -1336,6 +2056,24 @@ export function Scene3D({
       if (miniTick++ % 2 === 0) drawMap();
 
       renderer.render(scene, camera);
+
+      /*
+       * The readout, written after the render so `renderer.info` describes the
+       * frame that was just drawn rather than the one before it.
+       *
+       * Text is set about four times a second, not every frame. A number
+       * changing 60 times a second cannot be read, and rewriting a text node on
+       * every frame is work the readout imposes on the thing it is measuring.
+       */
+      if (statsVisibleRef.current && statsRef.current && statsTick++ % 15 === 0) {
+        statsRef.current.textContent = readoutLines(
+          stats,
+          renderer.info.render.calls,
+          renderer.info.render.triangles,
+          aimedLabel,
+          describeProfile(profileRef.current),
+        );
+      }
     };
     tick();
 
@@ -1351,6 +2089,7 @@ export function Scene3D({
       el.removeEventListener("pointermove", onPointerMove);
       el.removeEventListener("pointerup", onPointerUp);
       el.removeEventListener("pointercancel", onPointerUp);
+      document.removeEventListener("pointerlockchange", onLockChange);
       el.removeEventListener("webglcontextlost", onContextLost);
       for (const geo of disposables) geo.dispose();
       for (const tex of textures) tex.dispose();
@@ -1447,44 +2186,234 @@ export function Scene3D({
         </button>
       ))}
 
-      {/* Thumb pad, for a phone held in one hand. Hidden where there is a
-          keyboard, because two movement schemes at once is worse than one. */}
-      <div
-        className="absolute bottom-4 left-4 h-24 w-24 touch-none rounded-full border border-fog-700/40 bg-ink-900/60 select-none lg:hidden"
-        onPointerDown={(e) => {
-          e.currentTarget.setPointerCapture(e.pointerId);
-          padRef.current.active = true;
-        }}
-        onPointerMove={(e) => {
-          if (!padRef.current.active) return;
-          const rect = e.currentTarget.getBoundingClientRect();
-          const max = rect.width / 2;
-          let dx = e.clientX - (rect.left + max);
-          let dy = e.clientY - (rect.top + max);
-          const len = Math.hypot(dx, dy);
-          if (len > max) {
-            dx = (dx / len) * max;
-            dy = (dy / len) * max;
-          }
-          padRef.current.x = dx / max;
-          padRef.current.y = dy / max;
-        }}
-        onPointerUp={releasePad}
-        onPointerCancel={releasePad}
-        aria-label="Movement pad"
-      >
-        <span className="absolute left-1/2 top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border border-fog-500/60 bg-fog-500/20" />
-      </div>
-
-      {/* Turn buttons, so turning never needs a second thumb at once. */}
-      <div className="absolute bottom-4 right-4 flex gap-2 lg:hidden">
+      {/*
+        * The bottom bar — `docs/16` phase 5.
+        *
+        * One bar, not two corners. The pad was bottom-left and the turn buttons
+        * bottom-right, so on a large phone a thumb had to stretch across the
+        * screen or the hand had to shift, and shifting hands mid-task is how a
+        * trainee walks into the conveyor. Everything a thumb needs is now within
+        * one arc: turn, walk, turn, and get me back to where I started.
+        *
+        * Hidden where there is a keyboard, because two movement schemes at once
+        * is worse than one.
+        */}
+      <div className="absolute inset-x-0 bottom-0 flex items-end justify-center gap-3 pb-3 lg:hidden">
         <TurnButton dir={-1} turnRef={turnRef} />
+        <div
+          className="h-24 w-24 touch-none rounded-full border border-fog-700/40 bg-ink-900/60 select-none"
+          onPointerDown={(e) => {
+            e.currentTarget.setPointerCapture(e.pointerId);
+            padRef.current.active = true;
+          }}
+          onPointerMove={(e) => {
+            if (!padRef.current.active) return;
+            const rect = e.currentTarget.getBoundingClientRect();
+            const max = rect.width / 2;
+            let dx = e.clientX - (rect.left + max);
+            let dy = e.clientY - (rect.top + max);
+            const len = Math.hypot(dx, dy);
+            if (len > max) {
+              dx = (dx / len) * max;
+              dy = (dy / len) * max;
+            }
+            padRef.current.x = dx / max;
+            padRef.current.y = dy / max;
+          }}
+          onPointerUp={releasePad}
+          onPointerCancel={releasePad}
+          aria-label="Movement pad"
+        >
+          <span className="absolute left-1/2 top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border border-fog-500/60 bg-fog-500/20" />
+        </div>
         <TurnButton dir={1} turnRef={turnRef} />
+        {/* Back to the entry. The cheapest fix for a trainee lost in a corner. */}
+        <button
+          type="button"
+          onClick={() => {
+            homeRef.current = true;
+          }}
+          className="mb-1 h-12 w-12 rounded-full border border-fog-700/40 bg-ink-900/70 text-fog-300 backdrop-blur-sm active:bg-ink-800"
+          aria-label="Back to the start"
+          title="Back to the start"
+        >
+          <span className="font-mono text-[9px] uppercase tracking-wider">start</span>
+        </button>
       </div>
 
-      <p className="pointer-events-none absolute bottom-4 right-4 hidden rounded-md bg-ink-950/70 px-2.5 py-1.5 text-right font-mono text-[10px] uppercase tracking-wider text-fog-500 lg:block">
-        tap the floor to walk · tap an object to answer · drag to look · w a s d to walk · q / e to turn
+      <p className="pointer-events-none absolute bottom-4 right-4 hidden max-w-[16rem] rounded-md bg-ink-950/70 px-2.5 py-1.5 text-right font-mono text-[10px] uppercase tracking-wider text-fog-500 lg:block">
+        click to look around · w a s d to walk · q / e to turn · esc to release the cursor
       </p>
+
+      {/*
+        * Find and Learn — `docs/16` phase 6.
+        *
+        * The one part of image 2's chrome that is safe to build without a
+        * reviewer, because it names the room's contents and nothing else. The
+        * list is `LANDMARKS`, which is derived from the inert scenery table, and
+        * tapping a name walks you to it — navigation, not assessment. No entry
+        * here is a target, nothing here is graded, and the same test that keeps
+        * scenery out of the marker vocabulary keeps this panel out of scoring.
+        *
+        * Nearest first, computed when the panel is opened rather than every
+        * frame: "what is near me" is the question a lost trainee is asking.
+        */}
+      <div className="absolute left-2 top-2 z-10 flex flex-col items-start gap-1.5 sm:left-3 sm:top-3">
+        <button
+          type="button"
+          onClick={() => {
+            const next = !panelOpen;
+            setPanelOpen(next);
+            if (next) {
+              setPanelList(landmarksNear(camPosRef.current.x, camPosRef.current.z));
+            }
+          }}
+          className="rounded-md border border-fog-700/40 bg-ink-950/80 px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-fog-300 backdrop-blur-sm"
+          aria-expanded={panelOpen}
+        >
+          find and learn
+        </button>
+
+        {panelOpen && (
+          <div className="mt-1.5 w-56 rounded-lg border border-fog-700/40 bg-ink-950/90 p-1.5 backdrop-blur-sm">
+            <p className="px-1 pb-1 font-mono text-[9px] uppercase tracking-widest text-fog-500">
+              in this bay
+            </p>
+            <ul className="max-h-[46vh] overflow-y-auto">
+              {panelList.map((l) => (
+                <li key={l.id}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setChosen(l.id);
+                      // Stand off from it rather than inside it: the walker's own
+                      // push-out handles the rest, but a target inside the plant
+                      // is a walk that stalls.
+                      wantWalk.current = { x: l.x, z: l.z };
+                    }}
+                    className={clsx(
+                      "flex w-full items-baseline justify-between gap-2 rounded px-1.5 py-1 text-left font-mono text-[11px] text-fog-300 hover:bg-ink-800",
+                      chosen === l.id && "bg-ink-800 text-go-300",
+                    )}
+                  >
+                    <span>{l.name}</span>
+                    <span className="text-[9px] text-fog-600">
+                      {landmarkDistance(camPosRef.current, l).toFixed(0)}m
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <p className="px-1.5 pb-0.5 pt-1.5 font-mono text-[9px] leading-snug text-fog-600">
+              names only. what each thing is for is with the safety reviewer.
+            </p>
+          </div>
+        )}
+
+        {/*
+          * Review chrome — `docs/16` phase 0. In the same left-hand column as
+          * the panel, because three absolutely-positioned things all claiming
+          * the top-left corner is how a review screenshot ends up with a badge
+          * on top of a badge.
+          *
+          * The badge names the view and says the camera is locked, so a
+          * screenshot identifies itself: a photo of a frame with nothing on it
+          * cannot be told apart from one taken at the entry, and the whole value
+          * of a preset is that two photos can be compared.
+          */}
+        {view && (
+          <div className="pointer-events-none rounded-lg border border-amber-400/40 bg-ink-950/85 px-2.5 py-1.5 backdrop-blur-sm">
+            <p className="font-mono text-[10px] font-semibold uppercase tracking-widest text-amber-300">
+              {view.label} · camera locked
+            </p>
+            <p className="mt-0.5 max-w-[13rem] font-mono text-[9px] leading-snug text-fog-600">
+              {view.checks}
+            </p>
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() => setShowStats((prev) => !prev)}
+          className={clsx(
+            "rounded-md border px-2 py-1 font-mono text-[10px] uppercase tracking-wider backdrop-blur-sm",
+            showStats
+              ? "border-fog-600 bg-ink-900/90 text-fog-200"
+              : "border-fog-700/40 bg-ink-950/80 text-fog-500 hover:text-fog-200",
+          )}
+          aria-pressed={showStats}
+        >
+          {showStats ? "hide stats" : "stats"}
+        </button>
+      </div>
+
+      {/*
+        * The description card, from the same image.
+        *
+        * Built, and mostly empty on purpose. "What it is" and "when to use it"
+        * are safety copy: they are inputs to the R9 packet, not something a
+        * renderer may write. "Where it is" is filled in, because it is read off
+        * the coordinates and therefore cannot disagree with the room.
+        */}
+      {chosen && (() => {
+        const landmark = LANDMARKS.find((l) => l.id === chosen);
+        if (!landmark) return null;
+        return (
+          <div className="absolute inset-x-0 bottom-0 z-20 px-3 pb-28 lg:bottom-4 lg:left-3 lg:inset-x-auto lg:w-72 lg:pb-0">
+            <div className="rounded-lg border border-fog-700/50 bg-ink-950/92 p-3 backdrop-blur-sm">
+              <div className="flex items-start justify-between gap-2">
+                <p className="font-mono text-[11px] font-semibold uppercase tracking-widest text-go-300">
+                  {landmark.name}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setChosen(null)}
+                  className="font-mono text-[10px] text-fog-500 hover:text-fog-200"
+                  aria-label="Close"
+                >
+                  close
+                </button>
+              </div>
+              <dl className="mt-2 space-y-1.5">
+                <div>
+                  <dt className="font-mono text-[9px] uppercase tracking-widest text-fog-500">
+                    where it is
+                  </dt>
+                  <dd className="text-[12px] text-fog-200">{describeWhere(landmark)}</dd>
+                </div>
+                <div>
+                  <dt className="font-mono text-[9px] uppercase tracking-widest text-fog-500">
+                    what it is
+                  </dt>
+                  <dd className="text-[12px] italic text-fog-600">pending safety review</dd>
+                </div>
+                <div>
+                  <dt className="font-mono text-[9px] uppercase tracking-widest text-fog-500">
+                    when to use it
+                  </dt>
+                  <dd className="text-[12px] italic text-fog-600">pending safety review</dd>
+                </div>
+              </dl>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/*
+        * The readout. On-screen on purpose: a number a reviewer can photograph
+        * is evidence about a phone, and a number in a desktop devtools console
+        * is not.
+        *
+        * Bottom-left and clear of the control bar, which now spans the width of
+        * the screen on a phone — the two used to be in different corners and
+        * the readout landed on top of the turn buttons.
+        */}
+      {showStats && (
+        <div
+          ref={statsRef}
+          className="pointer-events-none absolute bottom-32 left-2 whitespace-pre rounded-lg border border-fog-700/40 bg-ink-950/85 px-2.5 py-1.5 font-mono text-[10px] leading-relaxed text-fog-400 backdrop-blur-sm lg:bottom-20 sm:left-3"
+        />
+      )}
     </div>
   );
 }

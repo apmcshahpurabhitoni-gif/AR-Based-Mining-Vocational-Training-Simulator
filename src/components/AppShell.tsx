@@ -23,17 +23,28 @@ import { useSession, useT } from "../lib/session";
 import { useSyncQueue } from "../lib/sync";
 import { LOCALE_LABELS, SELECTABLE_LOCALES } from "../lib/i18n";
 import { Chip } from "./ui";
+import { BuildNoticeBar } from "./BuildNotice";
 import type { Locale } from "../lib/types";
 
 export function AppShell() {
-  const { profile, token, locale, setLocale, signOut } = useSession();
+  const { profile, token, locale, setLocale, signOut, backendReachable } = useSession();
   const t = useT();
   const navigate = useNavigate();
   const queue = useSyncQueue(token);
   const [menuOpen, setMenuOpen] = useState(false);
   const { pathname } = useLocation();
 
-  const isSupervisor = profile?.role === "admin" || profile?.role === "supervisor";
+  /*
+   * The safety dashboard link follows the SERVER's answer about the role.
+   *
+   * Offline the profile is a cached copy, and a cached copy is something the
+   * device — not the server — is vouching for. The route is authorised
+   * server-side regardless, so this is not a security control; it is here so a
+   * stale cache cannot show a link that is guaranteed to fail. Nothing else
+   * depends on the role, so nothing else is affected.
+   */
+  const isSupervisor =
+    backendReachable && (profile?.role === "admin" || profile?.role === "supervisor");
 
   /** Routes that render a 3D surface rather than a document. */
   const isTrainingSurface =
@@ -54,6 +65,14 @@ export function AppShell() {
     <div className="flex min-h-dvh flex-col bg-ink-950">
       {/* Hazard tape: a thin, permanent reminder that this is a safety app. */}
       <div className="hazard-tape h-1 w-full shrink-0 opacity-70" aria-hidden="true" />
+
+      {/*
+        * The build status, above everything else on every signed-in page.
+        * See `BuildNotice` for why it is permanent and not dismissible — an
+        * installable file on a miner's phone looks far more finished than it is,
+        * and this is the one line that says otherwise.
+        */}
+      <BuildNoticeBar />
 
       <header className="sticky top-0 z-40 border-b border-ink-700 bg-ink-950/85 backdrop-blur-md">
         <div className="mx-auto flex h-16 max-w-6xl items-center gap-4 px-4 sm:px-6">
